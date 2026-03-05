@@ -34,6 +34,7 @@ import {
 	createNotificationMuteListService,
 	createNotificationMuteService,
 	createNotificationSendService,
+	createNotificationStatsService,
 	createNotificationUnmuteService,
 } from "./notification-service/index.js";
 import { PackageService, createPackageInstallService, createPackageListService } from "./package-service/index.js";
@@ -60,6 +61,7 @@ import {
 	createSystemAlertsService,
 	createSystemAlertsClearService,
 	createSystemAlertsExportService,
+	createSystemAlertsStatsService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -102,6 +104,10 @@ export interface CreateDefaultLLMOSOptions {
 	packageSigningSecret?: string;
 	netJournalLimit?: number;
 	notificationDedupeWindowMs?: number;
+	notificationRateLimit?: {
+		limit: number;
+		windowMs: number;
+	};
 	enabledServices?: Partial<Record<string, boolean>>;
 }
 
@@ -145,6 +151,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	const schedulerService = new SchedulerService(kernel.events);
 	const notificationService = new NotificationService(kernel.events, {
 		dedupeWindowMs: options.notificationDedupeWindowMs,
+		rateLimit: options.notificationRateLimit,
 	});
 	const mediaService = new MediaService();
 	const uiService = new UIService();
@@ -217,6 +224,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("notification.mute", () => createNotificationMuteService(notificationService));
 	registerWhenEnabled("notification.mute.list", () => createNotificationMuteListService(notificationService));
 	registerWhenEnabled("notification.unmute", () => createNotificationUnmuteService(notificationService));
+	registerWhenEnabled("notification.stats", () => createNotificationStatsService(notificationService));
 	registerWhenEnabled("media.inspect", () => createMediaInspectService(mediaService));
 	registerWhenEnabled("ui.render", () => createUIRenderService(uiService));
 	registerWhenEnabled("model.generate", () => createModelGenerateService(modelService));
@@ -239,6 +247,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.alerts", () => createSystemAlertsService(notificationService));
 	registerWhenEnabled("system.alerts.clear", () => createSystemAlertsClearService(notificationService));
 	registerWhenEnabled("system.alerts.export", () => createSystemAlertsExportService(notificationService));
+	registerWhenEnabled("system.alerts.stats", () => createSystemAlertsStatsService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

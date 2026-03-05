@@ -423,4 +423,25 @@ describe("NotificationService", () => {
 		expect(filtered[0]?.message).toBe("m2");
 		vi.useRealTimers();
 	});
+
+	it("rate limits notifications per topic and records stats", () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			rateLimit: { limit: 2, windowMs: 1000 },
+		});
+		expect(notification.send({ topic: "system.alert", message: "m1" })).toBe(true);
+		expect(notification.send({ topic: "system.alert", message: "m2" })).toBe(true);
+		expect(notification.send({ topic: "system.alert", message: "m3" })).toBe(false);
+
+		const stats = notification.getStats();
+		expect(stats.sent).toBe(2);
+		expect(stats.dropped.rateLimited).toBe(1);
+		expect(stats.byTopic["system.alert"]?.sent).toBe(2);
+		expect(stats.byTopic["system.alert"]?.dropped).toBe(1);
+
+		vi.advanceTimersByTime(1001);
+		expect(notification.send({ topic: "system.alert", message: "m4" })).toBe(true);
+		vi.useRealTimers();
+	});
 });

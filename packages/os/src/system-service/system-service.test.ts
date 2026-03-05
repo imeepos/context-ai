@@ -17,6 +17,7 @@ import {
 	createSystemAlertsService,
 	createSystemAlertsClearService,
 	createSystemAlertsExportService,
+	createSystemAlertsStatsService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -439,5 +440,29 @@ describe("SystemService", () => {
 		expect(csv.contentType).toBe("text/csv");
 		expect(csv.content.split("\n")[0]).toBe("timestamp,topic,severity,message");
 		expect(csv.content).toContain("system.alert");
+	});
+
+	it("returns system alert stats", async () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			rateLimit: { limit: 1, windowMs: 1000 },
+		});
+		notification.send({ topic: "system.alert", message: "a1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "a2", severity: "error" });
+
+		const service = createSystemAlertsStatsService(notification);
+		const response = await service.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s15",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.stats.sent).toBe(1);
+		expect(response.stats.dropped.rateLimited).toBe(1);
+		vi.useRealTimers();
 	});
 });

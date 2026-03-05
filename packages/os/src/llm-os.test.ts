@@ -199,6 +199,8 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(alertsExport.contentType).toBe("application/json");
+			const alertsStats = await os.kernel.execute("system.alerts.stats", {}, context);
+			expect(typeof alertsStats.stats.sent).toBe("number");
 			const clearedAlerts = await os.kernel.execute(
 				"system.alerts.clear",
 				{ topic: "system.alert", severity: "error" },
@@ -510,6 +512,22 @@ describe("createDefaultLLMOS", () => {
 			vi.advanceTimersByTime(1001);
 			os.notificationService.send({ topic: "system.alert", message: "dup" });
 			expect(os.notificationService.list()).toHaveLength(2);
+		} finally {
+			vi.useRealTimers();
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("applies notification rate limit from factory options", async () => {
+		vi.useFakeTimers();
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-notify-rate-"));
+		try {
+			const os = createDefaultLLMOS({
+				pathPolicy: { allow: [root], deny: [] },
+				notificationRateLimit: { limit: 1, windowMs: 1000 },
+			});
+			expect(os.notificationService.send({ topic: "system.alert", message: "r1" })).toBe(true);
+			expect(os.notificationService.send({ topic: "system.alert", message: "r2" })).toBe(false);
 		} finally {
 			vi.useRealTimers();
 			await rm(root, { recursive: true, force: true });

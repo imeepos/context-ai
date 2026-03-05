@@ -553,6 +553,22 @@ export function createSystemAlertsExportService(
 	};
 }
 
+export interface SystemAlertsStatsResponse {
+	stats: ReturnType<NotificationService["getStats"]>;
+}
+
+export function createSystemAlertsStatsService(
+	notificationService: NotificationService,
+): OSService<Record<string, never>, SystemAlertsStatsResponse> {
+	return {
+		name: "system.alerts.stats",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			stats: notificationService.getStats(),
+		}),
+	};
+}
+
 function thisEscapeCsv(value: string): string {
 	const escaped = value.replaceAll('"', '""');
 	return `"${escaped}"`;

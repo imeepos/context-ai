@@ -19,6 +19,10 @@ export interface NotificationListRequest {
 
 export interface NotificationServiceOptions {
 	dedupeWindowMs?: number;
+	rateLimit?: {
+		limit: number;
+		windowMs: number;
+	};
 }
 
 export interface NotificationRecord {
@@ -43,10 +47,36 @@ export interface NotificationMuteRecord {
 	muteUntil: string;
 }
 
+export interface NotificationStats {
+	sent: number;
+	dropped: {
+		dedupe: number;
+		muted: number;
+		rateLimited: number;
+	};
+	byTopic: Record<
+		string,
+		{
+			sent: number;
+			dropped: number;
+		}
+	>;
+}
+
 export class NotificationService {
 	private readonly sent: NotificationRecord[] = [];
 	private readonly lastSentAt = new Map<string, number>();
 	private readonly topicMuteUntil = new Map<string, number>();
+	private readonly topicSendTimes = new Map<string, number[]>();
+	private readonly stats: NotificationStats = {
+		sent: 0,
+		dropped: {
+			dedupe: 0,
+			muted: 0,
+			rateLimited: 0,
+		},
+		byTopic: {},
+	};
 
 	constructor(
 		private readonly eventBus: EventBus,
@@ -55,16 +85,22 @@ export class NotificationService {
 
 	send(request: NotifyRequest): boolean {
 		if (this.isTopicMuted(request.topic)) {
+			this.recordDrop(request.topic, "muted");
 			return false;
 		}
 
 		const severity = request.severity ?? "info";
+		if (!this.isWithinRateLimit(request.topic)) {
+			this.recordDrop(request.topic, "rateLimited");
+			return false;
+		}
 		const dedupeWindowMs = this.options.dedupeWindowMs ?? 0;
 		if (dedupeWindowMs > 0) {
 			const key = `${request.topic}::${severity}::${request.message}`;
 			const now = Date.now();
 			const last = this.lastSentAt.get(key);
 			if (last !== undefined && now - last <= dedupeWindowMs) {
+				this.recordDrop(request.topic, "dedupe");
 				return false;
 			}
 			this.lastSentAt.set(key, now);
@@ -79,6 +115,7 @@ export class NotificationService {
 			message: request.message,
 			severity,
 		});
+		this.recordSent(request.topic);
 		return true;
 	}
 
@@ -149,12 +186,52 @@ export class NotificationService {
 		return records.sort((a, b) => a.topic.localeCompare(b.topic));
 	}
 
+	getStats(): NotificationStats {
+		return {
+			sent: this.stats.sent,
+			dropped: { ...this.stats.dropped },
+			byTopic: Object.fromEntries(
+				Object.entries(this.stats.byTopic).map(([topic, value]) => [topic, { ...value }]),
+			),
+		};
+	}
+
 	private isTopicMuted(topic: string): boolean {
 		const muteUntil = this.topicMuteUntil.get(topic);
 		if (muteUntil === undefined) return false;
 		if (Date.now() <= muteUntil) return true;
 		this.topicMuteUntil.delete(topic);
 		return false;
+	}
+
+	private isWithinRateLimit(topic: string): boolean {
+		const limitRule = this.options.rateLimit;
+		if (!limitRule) return true;
+		const now = Date.now();
+		const windowStart = now - limitRule.windowMs;
+		const current = this.topicSendTimes.get(topic) ?? [];
+		const filtered = current.filter((timestamp) => timestamp >= windowStart);
+		if (filtered.length >= limitRule.limit) {
+			this.topicSendTimes.set(topic, filtered);
+			return false;
+		}
+		filtered.push(now);
+		this.topicSendTimes.set(topic, filtered);
+		return true;
+	}
+
+	private recordSent(topic: string): void {
+		this.stats.sent += 1;
+		const current = this.stats.byTopic[topic] ?? { sent: 0, dropped: 0 };
+		current.sent += 1;
+		this.stats.byTopic[topic] = current;
+	}
+
+	private recordDrop(topic: string, reason: "dedupe" | "muted" | "rateLimited"): void {
+		this.stats.dropped[reason] += 1;
+		const current = this.stats.byTopic[topic] ?? { sent: 0, dropped: 0 };
+		current.dropped += 1;
+		this.stats.byTopic[topic] = current;
 	}
 }
 
@@ -215,6 +292,18 @@ export function createNotificationMuteListService(
 		requiredPermissions: ["notification:read"],
 		execute: async () => ({
 			mutes: notification.listMutes(),
+		}),
+	};
+}
+
+export function createNotificationStatsService(
+	notification: NotificationService,
+): OSService<Record<string, never>, { stats: NotificationStats }> {
+	return {
+		name: "notification.stats",
+		requiredPermissions: ["notification:read"],
+		execute: async () => ({
+			stats: notification.getStats(),
 		}),
 	};
 }
