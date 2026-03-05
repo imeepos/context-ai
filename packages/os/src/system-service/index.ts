@@ -469,3 +469,27 @@ export function createSystemAlertsService(
 		},
 	};
 }
+
+export interface SystemAlertsClearRequest {
+	topic?: string;
+	severity?: NotificationSeverity;
+}
+
+export interface SystemAlertsClearResponse {
+	cleared: number;
+}
+
+export function createSystemAlertsClearService(
+	notificationService: NotificationService,
+): OSService<SystemAlertsClearRequest, SystemAlertsClearResponse> {
+	return {
+		name: "system.alerts.clear",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => ({
+			cleared: notificationService.clear({
+				topic: req.topic,
+				severity: req.severity,
+			}),
+		}),
+	};
+}

@@ -193,6 +193,12 @@ describe("createDefaultLLMOS", () => {
 			expect(listedAlerts.notifications.length).toBeGreaterThan(0);
 			const alertsSummary = await os.kernel.execute("system.alerts", { topic: "system.alert", limit: 10 }, context);
 			expect(alertsSummary.total).toBeGreaterThan(0);
+			const clearedAlerts = await os.kernel.execute(
+				"system.alerts.clear",
+				{ topic: "system.alert", severity: "error" },
+				context,
+			);
+			expect(typeof clearedAlerts.cleared).toBe("number");
 			await os.kernel.execute("notification.mute", { topic: "system.alert", durationMs: 1000 }, context);
 			const muted = await os.kernel.execute(
 				"notification.send",

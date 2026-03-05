@@ -15,6 +15,7 @@ import {
 	createSystemEventsService,
 	createSystemMetricsService,
 	createSystemAlertsService,
+	createSystemAlertsClearService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -364,5 +365,26 @@ describe("SystemService", () => {
 		expect(response.total).toBe(2);
 		expect(response.bySeverity.error).toBe(1);
 		expect(response.bySeverity.critical).toBe(1);
+	});
+
+	it("clears system alerts by filters", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "a1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "a2", severity: "critical" });
+		notification.send({ topic: "business.info", message: "x", severity: "info" });
+
+		const service = createSystemAlertsClearService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", severity: "error" },
+			{
+				appId: "app.demo",
+				sessionId: "s13",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.cleared).toBe(1);
+		expect(notification.query({ topic: "system.alert" })).toHaveLength(1);
 	});
 });

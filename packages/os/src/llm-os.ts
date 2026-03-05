@@ -57,6 +57,7 @@ import { StoreService, createStoreGetService, createStoreSetService, type StoreV
 import {
 	createSystemAuditService,
 	createSystemAlertsService,
+	createSystemAlertsClearService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -233,6 +234,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.net.circuit.reset", () => createSystemNetCircuitResetService(netService));
 	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
 	registerWhenEnabled("system.alerts", () => createSystemAlertsService(notificationService));
+	registerWhenEnabled("system.alerts.clear", () => createSystemAlertsClearService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

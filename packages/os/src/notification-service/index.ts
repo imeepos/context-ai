@@ -31,6 +31,11 @@ export interface MuteTopicRequest {
 	durationMs: number;
 }
 
+export interface NotificationClearRequest {
+	topic?: string;
+	severity?: NotificationSeverity;
+}
+
 export class NotificationService {
 	private readonly sent: NotificationRecord[] = [];
 	private readonly lastSentAt = new Map<string, number>();
@@ -86,6 +91,19 @@ export class NotificationService {
 			records = records.slice(-request.limit);
 		}
 		return records;
+	}
+
+	clear(request: NotificationClearRequest): number {
+		const before = this.sent.length;
+		const retained = this.sent.filter((record) => {
+			if (request.topic && record.topic !== request.topic) return true;
+			if (request.severity && record.severity !== request.severity) return true;
+			if (!request.topic && !request.severity) return false;
+			return false;
+		});
+		this.sent.length = 0;
+		this.sent.push(...retained);
+		return before - retained.length;
 	}
 
 	muteTopic(request: MuteTopicRequest): void {
