@@ -387,6 +387,22 @@ describe("NotificationService", () => {
 		vi.useRealTimers();
 	});
 
+	it("lists active mute topics", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.muteTopic({ topic: "system.alert", durationMs: 1000 });
+		notification.muteTopic({ topic: "ops.alert", durationMs: 2000 });
+		const mutes = notification.listMutes();
+		expect(mutes).toHaveLength(2);
+		expect(mutes[0]?.topic).toBe("ops.alert");
+		vi.setSystemTime(new Date("2026-01-01T00:00:02.100Z"));
+		const mutesAfter = notification.listMutes();
+		expect(mutesAfter).toHaveLength(0);
+		vi.useRealTimers();
+	});
+
 	it("filters notifications by since/until window", () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));

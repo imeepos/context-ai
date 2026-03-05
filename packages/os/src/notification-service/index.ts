@@ -38,6 +38,11 @@ export interface NotificationClearRequest {
 	severity?: NotificationSeverity;
 }
 
+export interface NotificationMuteRecord {
+	topic: string;
+	muteUntil: string;
+}
+
 export class NotificationService {
 	private readonly sent: NotificationRecord[] = [];
 	private readonly lastSentAt = new Map<string, number>();
@@ -128,6 +133,22 @@ export class NotificationService {
 		return this.topicMuteUntil.delete(topic);
 	}
 
+	listMutes(): NotificationMuteRecord[] {
+		const now = Date.now();
+		const records: NotificationMuteRecord[] = [];
+		for (const [topic, muteUntil] of this.topicMuteUntil.entries()) {
+			if (muteUntil <= now) {
+				this.topicMuteUntil.delete(topic);
+				continue;
+			}
+			records.push({
+				topic,
+				muteUntil: new Date(muteUntil).toISOString(),
+			});
+		}
+		return records.sort((a, b) => a.topic.localeCompare(b.topic));
+	}
+
 	private isTopicMuted(topic: string): boolean {
 		const muteUntil = this.topicMuteUntil.get(topic);
 		if (muteUntil === undefined) return false;
@@ -182,6 +203,18 @@ export function createNotificationUnmuteService(
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => ({
 			unmuted: notification.unmuteTopic(req.topic),
+		}),
+	};
+}
+
+export function createNotificationMuteListService(
+	notification: NotificationService,
+): OSService<Record<string, never>, { mutes: NotificationMuteRecord[] }> {
+	return {
+		name: "notification.mute.list",
+		requiredPermissions: ["notification:read"],
+		execute: async () => ({
+			mutes: notification.listMutes(),
 		}),
 	};
 }

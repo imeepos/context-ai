@@ -31,6 +31,7 @@ import { NetService, createNetRequestService } from "./net-service/index.js";
 import {
 	NotificationService,
 	createNotificationListService,
+	createNotificationMuteListService,
 	createNotificationMuteService,
 	createNotificationSendService,
 	createNotificationUnmuteService,
@@ -214,6 +215,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
 	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
 	registerWhenEnabled("notification.mute", () => createNotificationMuteService(notificationService));
+	registerWhenEnabled("notification.mute.list", () => createNotificationMuteListService(notificationService));
 	registerWhenEnabled("notification.unmute", () => createNotificationUnmuteService(notificationService));
 	registerWhenEnabled("media.inspect", () => createMediaInspectService(mediaService));
 	registerWhenEnabled("ui.render", () => createUIRenderService(uiService));
