@@ -303,6 +303,29 @@ describe("SchedulerService", () => {
 		expect(scheduler.listFailures()).toHaveLength(0);
 		vi.useRealTimers();
 	});
+
+	it("replays dead letter task and succeeds", async () => {
+		vi.useFakeTimers();
+		const scheduler = new SchedulerService();
+		let runs = 0;
+		scheduler.scheduleRetryable(
+			"job-replay-1",
+			async () => {
+				runs += 1;
+				if (runs === 1) {
+					throw new Error("first-fail");
+				}
+			},
+			{ maxRetries: 0, backoffMs: 5 },
+		);
+		await vi.advanceTimersByTimeAsync(30);
+		expect(scheduler.listFailures()).toHaveLength(1);
+		expect(scheduler.replayFailure("job-replay-1")).toBe(true);
+		await vi.advanceTimersByTimeAsync(30);
+		expect(scheduler.listFailures()).toHaveLength(0);
+		expect(runs).toBe(2);
+		vi.useRealTimers();
+	});
 });
 
 describe("NotificationService", () => {

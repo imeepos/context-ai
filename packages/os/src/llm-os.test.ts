@@ -146,6 +146,9 @@ describe("createDefaultLLMOS", () => {
 			await vi.advanceTimersByTimeAsync(20);
 			const schedulerFailures = await os.kernel.execute("system.scheduler.failures", { limit: 10 }, context);
 			expect(schedulerFailures.failures.length).toBeGreaterThan(0);
+			const replayed = await os.kernel.execute("scheduler.failures.replay", { id: "job-dlq-int" }, context);
+			expect(replayed.replayed).toBe(true);
+			await vi.advanceTimersByTimeAsync(20);
 			const cleared = await os.kernel.execute(
 				"scheduler.failures.clear",
 				{ id: "job-dlq-int" },

@@ -38,6 +38,7 @@ import {
 	SchedulerService,
 	createSchedulerCancelService,
 	createSchedulerFailuresClearService,
+	createSchedulerFailuresReplayService,
 	createSchedulerListService,
 	createSchedulerScheduleIntervalService,
 	createSchedulerScheduleOnceService,
@@ -200,6 +201,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("scheduler.cancel", () => createSchedulerCancelService(schedulerService));
 	registerWhenEnabled("scheduler.list", () => createSchedulerListService(schedulerService));
 	registerWhenEnabled("scheduler.failures.clear", () => createSchedulerFailuresClearService(schedulerService));
+	registerWhenEnabled("scheduler.failures.replay", () => createSchedulerFailuresReplayService(schedulerService));
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
 	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
 	registerWhenEnabled("media.inspect", () => createMediaInspectService(mediaService));

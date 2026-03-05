@@ -17,9 +17,18 @@ export interface SchedulerFailureRecord {
 	timestamp: string;
 }
 
+interface RetryableTaskDefinition {
+	task: () => Promise<void>;
+	options: {
+		maxRetries: number;
+		backoffMs: number;
+	};
+}
+
 export class SchedulerService {
 	private readonly tasks = new Map<string, TaskHandle>();
 	private readonly failures: SchedulerFailureRecord[] = [];
+	private readonly retryableDefinitions = new Map<string, RetryableTaskDefinition>();
 	constructor(private readonly eventBus?: EventBus) {}
 
 	publishEvent(topic: string, payload?: unknown): void {
@@ -89,6 +98,18 @@ export class SchedulerService {
 		return before - retained.length;
 	}
 
+	replayFailure(id: string): boolean {
+		const hasFailure = this.failures.some((item) => item.id === id);
+		if (!hasFailure) return false;
+		const definition = this.retryableDefinitions.get(id);
+		if (!definition) return false;
+		if (this.tasks.has(id)) return false;
+		this.clearFailures(id);
+		this.scheduleRetryable(id, definition.task, definition.options);
+		this.eventBus?.publish("scheduler.task.replayed", { id });
+		return true;
+	}
+
 	scheduleRetryable(
 		id: string,
 		task: () => Promise<void>,
@@ -98,6 +119,7 @@ export class SchedulerService {
 		},
 	): ScheduledTask {
 		if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
+		this.retryableDefinitions.set(id, { task, options });
 
 		let cancelled = false;
 		const run = async (attempt: number): Promise<void> => {
@@ -105,6 +127,7 @@ export class SchedulerService {
 			try {
 				await task();
 				this.tasks.delete(id);
+				this.clearFailures(id);
 				this.eventBus?.publish("scheduler.task.succeeded", {
 					id,
 					attempt,
@@ -177,6 +200,10 @@ export interface ClearSchedulerFailuresRequest {
 	id?: string;
 }
 
+export interface ReplaySchedulerFailureRequest {
+	id: string;
+}
+
 export function createSchedulerCancelService(scheduler: SchedulerService): OSService<CancelTaskRequest, { cancelled: boolean }> {
 	return {
 		name: "scheduler.cancel",
@@ -238,6 +265,18 @@ export function createSchedulerFailuresClearService(
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => ({
 			cleared: scheduler.clearFailures(req.id),
+		}),
+	};
+}
+
+export function createSchedulerFailuresReplayService(
+	scheduler: SchedulerService,
+): OSService<ReplaySchedulerFailureRequest, { replayed: boolean }> {
+	return {
+		name: "scheduler.failures.replay",
+		requiredPermissions: ["scheduler:write"],
+		execute: async (req) => ({
+			replayed: scheduler.replayFailure(req.id),
 		}),
 	};
 }
