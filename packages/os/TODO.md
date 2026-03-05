@@ -11,6 +11,7 @@
 - [x] M5(稳定性阶段)-7: `system.snapshot` 增加稳定性摘要（open circuit / scheduler failures）
 - [x] M5(稳定性阶段)-8: 工厂级通知去重配置 `notificationDedupeWindowMs`
 - [x] M5(稳定性阶段)-9: 熔断运维动作 `system.net.circuit.reset`（按 host / 全量）
+- [x] M5(稳定性阶段)-10: `system.scheduler.failures` 支持按任务 id 过滤查询
 - [x] M1: Kernel + 三大核心域（AppManager / FileService / ShellService）
 - [x] M2: NetService / StoreService / SchedulerService / SecurityService / NotificationService
 - [x] 统一工厂：`createDefaultLLMOS()` 与默认服务注册

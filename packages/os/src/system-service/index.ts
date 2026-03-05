@@ -408,6 +408,7 @@ export function createSystemNetCircuitResetService(
 }
 
 export interface SystemSchedulerFailuresRequest {
+	id?: string;
 	limit?: number;
 }
 
@@ -421,8 +422,12 @@ export function createSystemSchedulerFailuresService(
 	return {
 		name: "system.scheduler.failures",
 		requiredPermissions: ["system:read"],
-		execute: async (req) => ({
-			failures: schedulerService.listFailures(req.limit),
-		}),
+		execute: async (req) => {
+			let failures = schedulerService.listFailures(req.limit);
+			if (req.id) {
+				failures = failures.filter((item) => item.id === req.id);
+			}
+			return { failures };
+		},
 	};
 }

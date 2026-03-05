@@ -318,7 +318,7 @@ describe("SystemService", () => {
 		await vi.advanceTimersByTimeAsync(20);
 		const service = createSystemSchedulerFailuresService(scheduler);
 		const response = await service.execute(
-			{ limit: 10 },
+			{ id: "dlq-1", limit: 10 },
 			{
 				appId: "app.demo",
 				sessionId: "s11",
@@ -328,6 +328,16 @@ describe("SystemService", () => {
 		);
 		expect(response.failures).toHaveLength(1);
 		expect(response.failures[0]?.id).toBe("dlq-1");
+		const none = await service.execute(
+			{ id: "unknown", limit: 10 },
+			{
+				appId: "app.demo",
+				sessionId: "s11",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(none.failures).toHaveLength(0);
 		vi.useRealTimers();
 	});
 });
