@@ -31,6 +31,7 @@ import { NetService, createNetRequestService } from "./net-service/index.js";
 import {
 	NotificationService,
 	createNotificationListService,
+	createNotificationAckService,
 	createNotificationMuteListService,
 	createNotificationMuteService,
 	createNotificationSendService,
@@ -63,6 +64,7 @@ import {
 	createSystemAlertsExportService,
 	createSystemAlertsStatsService,
 	createSystemAlertsTopicsService,
+	createSystemAlertsUnackedService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -221,6 +223,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("scheduler.failures.clear", () => createSchedulerFailuresClearService(schedulerService));
 	registerWhenEnabled("scheduler.failures.replay", () => createSchedulerFailuresReplayService(schedulerService));
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
+	registerWhenEnabled("notification.ack", () => createNotificationAckService(notificationService));
 	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
 	registerWhenEnabled("notification.mute", () => createNotificationMuteService(notificationService));
 	registerWhenEnabled("notification.mute.list", () => createNotificationMuteListService(notificationService));
@@ -250,6 +253,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.alerts.export", () => createSystemAlertsExportService(notificationService));
 	registerWhenEnabled("system.alerts.stats", () => createSystemAlertsStatsService(notificationService));
 	registerWhenEnabled("system.alerts.topics", () => createSystemAlertsTopicsService(notificationService));
+	registerWhenEnabled("system.alerts.unacked", () => createSystemAlertsUnackedService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

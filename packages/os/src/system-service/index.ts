@@ -608,6 +608,38 @@ export function createSystemAlertsTopicsService(
 	};
 }
 
+export interface SystemAlertsUnackedRequest {
+	topic?: string;
+	severity?: NotificationSeverity;
+	limit?: number;
+}
+
+export interface SystemAlertsUnackedResponse {
+	total: number;
+	alerts: ReturnType<NotificationService["query"]>;
+}
+
+export function createSystemAlertsUnackedService(
+	notificationService: NotificationService,
+): OSService<SystemAlertsUnackedRequest, SystemAlertsUnackedResponse> {
+	return {
+		name: "system.alerts.unacked",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const alerts = notificationService.query({
+				topic: req.topic,
+				severity: req.severity,
+				acknowledged: false,
+				limit: req.limit,
+			});
+			return {
+				total: alerts.length,
+				alerts,
+			};
+		},
+	};
+}
+
 function thisEscapeCsv(value: string): string {
 	const escaped = value.replaceAll('"', '""');
 	return `"${escaped}"`;

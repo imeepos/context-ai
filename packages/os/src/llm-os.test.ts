@@ -203,6 +203,17 @@ describe("createDefaultLLMOS", () => {
 			expect(typeof alertsStats.stats.sent).toBe("number");
 			const alertsTopics = await os.kernel.execute("system.alerts.topics", {}, context);
 			expect(typeof alertsTopics.topics).toBe("object");
+			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
+			if (alertsList.notifications[0]?.id) {
+				const ack = await os.kernel.execute(
+					"notification.ack",
+					{ id: alertsList.notifications[0].id },
+					context,
+				);
+				expect(ack.acknowledged).toBe(1);
+			}
+			const unacked = await os.kernel.execute("system.alerts.unacked", { topic: "system.alert" }, context);
+			expect(typeof unacked.total).toBe("number");
 			const clearedAlerts = await os.kernel.execute(
 				"system.alerts.clear",
 				{ topic: "system.alert", severity: "error" },

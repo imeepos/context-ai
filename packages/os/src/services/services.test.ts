@@ -444,4 +444,20 @@ describe("NotificationService", () => {
 		expect(notification.send({ topic: "system.alert", message: "m4" })).toBe(true);
 		vi.useRealTimers();
 	});
+
+	it("acknowledges notifications and filters unacked records", () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "m1" });
+		notification.send({ topic: "system.alert", message: "m2" });
+		const all = notification.query({ topic: "system.alert" });
+		expect(all).toHaveLength(2);
+		const firstId = all[0]?.id;
+		expect(firstId).toBeDefined();
+		const acked = notification.ack({ id: firstId! });
+		expect(acked).toBe(1);
+		const unacked = notification.query({ topic: "system.alert", acknowledged: false });
+		expect(unacked).toHaveLength(1);
+		expect(unacked[0]?.message).toBe("m2");
+	});
 });

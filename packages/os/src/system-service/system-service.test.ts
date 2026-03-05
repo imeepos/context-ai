@@ -19,6 +19,7 @@ import {
 	createSystemAlertsExportService,
 	createSystemAlertsStatsService,
 	createSystemAlertsTopicsService,
+	createSystemAlertsUnackedService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -491,5 +492,27 @@ describe("SystemService", () => {
 		expect(response.topics["system.alert"]?.dropped).toBe(1);
 		expect(response.topics["ops.alert"]?.sent).toBe(1);
 		vi.useRealTimers();
+	});
+
+	it("returns unacked alerts", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "u1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "u2", severity: "error" });
+		const first = notification.query({ topic: "system.alert", limit: 1 })[0];
+		if (first) {
+			notification.ack({ id: first.id });
+		}
+		const service = createSystemAlertsUnackedService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert" },
+			{
+				appId: "app.demo",
+				sessionId: "s17",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.total).toBe(1);
 	});
 });

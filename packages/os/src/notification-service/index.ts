@@ -12,6 +12,7 @@ export interface NotifyRequest {
 export interface NotificationListRequest {
 	topic?: string;
 	severity?: NotificationSeverity;
+	acknowledged?: boolean;
 	since?: string;
 	until?: string;
 	limit?: number;
@@ -26,9 +27,11 @@ export interface NotificationServiceOptions {
 }
 
 export interface NotificationRecord {
+	id: string;
 	topic: string;
 	message: string;
 	severity: NotificationSeverity;
+	acknowledged: boolean;
 	timestamp: string;
 }
 
@@ -45,6 +48,10 @@ export interface NotificationClearRequest {
 export interface NotificationMuteRecord {
 	topic: string;
 	muteUntil: string;
+}
+
+export interface NotificationAckRequest {
+	id: string;
 }
 
 export interface NotificationStats {
@@ -68,6 +75,7 @@ export class NotificationService {
 	private readonly lastSentAt = new Map<string, number>();
 	private readonly topicMuteUntil = new Map<string, number>();
 	private readonly topicSendTimes = new Map<string, number[]>();
+	private sequence = 0;
 	private readonly stats: NotificationStats = {
 		sent: 0,
 		dropped: {
@@ -106,9 +114,11 @@ export class NotificationService {
 			this.lastSentAt.set(key, now);
 		}
 		this.sent.push({
+			id: this.nextId(),
 			topic: request.topic,
 			message: request.message,
 			severity,
+			acknowledged: false,
 			timestamp: new Date().toISOString(),
 		});
 		this.eventBus.publish(request.topic, {
@@ -131,6 +141,9 @@ export class NotificationService {
 		if (request.severity) {
 			records = records.filter((record) => record.severity === request.severity);
 		}
+		if (request.acknowledged !== undefined) {
+			records = records.filter((record) => record.acknowledged === request.acknowledged);
+		}
 		if (request.since) {
 			const sinceMs = Date.parse(request.since);
 			if (!Number.isNaN(sinceMs)) {
@@ -147,6 +160,17 @@ export class NotificationService {
 			records = records.slice(-request.limit);
 		}
 		return records;
+	}
+
+	ack(request: NotificationAckRequest): number {
+		let count = 0;
+		for (const record of this.sent) {
+			if (record.id === request.id && !record.acknowledged) {
+				record.acknowledged = true;
+				count += 1;
+			}
+		}
+		return count;
 	}
 
 	clear(request: NotificationClearRequest): number {
@@ -233,6 +257,11 @@ export class NotificationService {
 		current.dropped += 1;
 		this.stats.byTopic[topic] = current;
 	}
+
+	private nextId(): string {
+		this.sequence += 1;
+		return `ntf-${Date.now()}-${this.sequence}`;
+	}
 }
 
 export function createNotificationSendService(
@@ -304,6 +333,18 @@ export function createNotificationStatsService(
 		requiredPermissions: ["notification:read"],
 		execute: async () => ({
 			stats: notification.getStats(),
+		}),
+	};
+}
+
+export function createNotificationAckService(
+	notification: NotificationService,
+): OSService<NotificationAckRequest, { acknowledged: number }> {
+	return {
+		name: "notification.ack",
+		requiredPermissions: ["notification:write"],
+		execute: async (req) => ({
+			acknowledged: notification.ack(req),
 		}),
 	};
 }
