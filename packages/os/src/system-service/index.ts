@@ -387,6 +387,26 @@ export function createSystemNetCircuitService(
 	};
 }
 
+export interface SystemNetCircuitResetRequest {
+	host?: string;
+}
+
+export interface SystemNetCircuitResetResponse {
+	cleared: number;
+}
+
+export function createSystemNetCircuitResetService(
+	netService: NetService,
+): OSService<SystemNetCircuitResetRequest, SystemNetCircuitResetResponse> {
+	return {
+		name: "system.net.circuit.reset",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => ({
+			cleared: netService.resetCircuits(req.host),
+		}),
+	};
+}
+
 export interface SystemSchedulerFailuresRequest {
 	limit?: number;
 }

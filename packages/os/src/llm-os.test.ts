@@ -135,6 +135,8 @@ describe("createDefaultLLMOS", () => {
 			expect(policyEval.allowed).toBe(true);
 			const netCircuit = await os.kernel.execute("system.net.circuit", {}, context);
 			expect(netCircuit.circuits).toBeDefined();
+			const netCircuitReset = await os.kernel.execute("system.net.circuit.reset", {}, context);
+			expect(typeof netCircuitReset.cleared).toBe("number");
 			vi.useFakeTimers();
 			os.schedulerService.scheduleRetryable(
 				"job-dlq-int",

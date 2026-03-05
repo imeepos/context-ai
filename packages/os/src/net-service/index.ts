@@ -157,6 +157,15 @@ export class NetService {
 		return result;
 	}
 
+	resetCircuits(host?: string): number {
+		if (host) {
+			return this.circuits.delete(host) ? 1 : 0;
+		}
+		const count = this.circuits.size;
+		this.circuits.clear();
+		return count;
+	}
+
 	private normalizeHost(url: string): string {
 		try {
 			return new URL(url).host;

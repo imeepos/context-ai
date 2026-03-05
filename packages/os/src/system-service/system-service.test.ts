@@ -13,6 +13,7 @@ import {
 	createSystemEventsService,
 	createSystemMetricsService,
 	createSystemNetCircuitService,
+	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
 	createSystemPolicyService,
 	createSystemSchedulerFailuresService,
@@ -270,6 +271,36 @@ describe("SystemService", () => {
 		const service = createSystemNetCircuitService(net);
 		const response = await service.execute({}, ctx);
 		expect(response.circuits["example.com"]?.state).toBe("open");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
+	});
+
+	it("resets network circuit breaker state", async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValueOnce(new Error("e1"))
+			.mockRejectedValueOnce(new Error("e2"));
+		const net = new NetService(new PolicyEngine(), new SecurityService(), undefined, {
+			circuitBreaker: {
+				failureThreshold: 2,
+				cooldownMs: 3000,
+			},
+		});
+		const ctx = {
+			appId: "app.demo",
+			sessionId: "s10b",
+			permissions: ["system:read", "net:request"],
+			workingDirectory: process.cwd(),
+		};
+		await expect(net.request({ url: "https://example.com" }, ctx)).rejects.toThrow("e1");
+		await expect(net.request({ url: "https://example.com" }, ctx)).rejects.toThrow("e2");
+		const resetService = createSystemNetCircuitResetService(net);
+		const reset = await resetService.execute({ host: "example.com" }, ctx);
+		expect(reset.cleared).toBe(1);
+		const snapshotService = createSystemNetCircuitService(net);
+		const snapshot = await snapshotService.execute({}, ctx);
+		expect(snapshot.circuits["example.com"]).toBeUndefined();
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		vi.useRealTimers();
 	});

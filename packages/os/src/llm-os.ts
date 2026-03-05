@@ -62,6 +62,7 @@ import {
 	createSystemHealthService,
 	createSystemMetricsService,
 	createSystemNetCircuitService,
+	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
 	createSystemPolicyService,
 	createSystemSchedulerFailuresService,
@@ -224,6 +225,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.policy", () => createSystemPolicyService(kernel));
 	registerWhenEnabled("system.policy.evaluate", () => createSystemPolicyEvaluateService(kernel));
 	registerWhenEnabled("system.net.circuit", () => createSystemNetCircuitService(netService));
+	registerWhenEnabled("system.net.circuit.reset", () => createSystemNetCircuitResetService(netService));
 	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
