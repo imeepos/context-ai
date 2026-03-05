@@ -193,6 +193,12 @@ describe("createDefaultLLMOS", () => {
 			expect(listedAlerts.notifications.length).toBeGreaterThan(0);
 			const alertsSummary = await os.kernel.execute("system.alerts", { topic: "system.alert", limit: 10 }, context);
 			expect(alertsSummary.total).toBeGreaterThan(0);
+			const alertsExport = await os.kernel.execute(
+				"system.alerts.export",
+				{ topic: "system.alert", format: "json" },
+				context,
+			);
+			expect(alertsExport.contentType).toBe("application/json");
 			const clearedAlerts = await os.kernel.execute(
 				"system.alerts.clear",
 				{ topic: "system.alert", severity: "error" },

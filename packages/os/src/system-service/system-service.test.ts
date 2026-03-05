@@ -16,6 +16,7 @@ import {
 	createSystemMetricsService,
 	createSystemAlertsService,
 	createSystemAlertsClearService,
+	createSystemAlertsExportService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -405,5 +406,38 @@ describe("SystemService", () => {
 		);
 		expect(response.cleared).toBe(1);
 		expect(notification.query({ topic: "system.alert" })).toHaveLength(1);
+	});
+
+	it("exports alerts as json and csv", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "a1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "a2", severity: "critical" });
+
+		const service = createSystemAlertsExportService(notification);
+		const json = await service.execute(
+			{ topic: "system.alert", format: "json" },
+			{
+				appId: "app.demo",
+				sessionId: "s14",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(json.contentType).toBe("application/json");
+		expect(json.content).toContain("\"topic\":\"system.alert\"");
+
+		const csv = await service.execute(
+			{ topic: "system.alert", format: "csv" },
+			{
+				appId: "app.demo",
+				sessionId: "s14",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(csv.contentType).toBe("text/csv");
+		expect(csv.content.split("\n")[0]).toBe("timestamp,topic,severity,message");
+		expect(csv.content).toContain("system.alert");
 	});
 });

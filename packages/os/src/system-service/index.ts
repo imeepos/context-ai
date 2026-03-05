@@ -497,3 +497,63 @@ export function createSystemAlertsClearService(
 		}),
 	};
 }
+
+export interface SystemAlertsExportRequest {
+	topic?: string;
+	severity?: NotificationSeverity;
+	since?: string;
+	until?: string;
+	limit?: number;
+	format?: "json" | "csv";
+}
+
+export interface SystemAlertsExportResponse {
+	format: "json" | "csv";
+	contentType: "application/json" | "text/csv";
+	content: string;
+}
+
+export function createSystemAlertsExportService(
+	notificationService: NotificationService,
+): OSService<SystemAlertsExportRequest, SystemAlertsExportResponse> {
+	return {
+		name: "system.alerts.export",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const alerts = notificationService.query({
+				topic: req.topic,
+				severity: req.severity,
+				since: req.since,
+				until: req.until,
+				limit: req.limit,
+			});
+			const format = req.format ?? "json";
+			if (format === "csv") {
+				const header = "timestamp,topic,severity,message";
+				const rows = alerts.map((alert) =>
+					[
+						thisEscapeCsv(alert.timestamp),
+						thisEscapeCsv(alert.topic),
+						thisEscapeCsv(alert.severity),
+						thisEscapeCsv(alert.message),
+					].join(","),
+				);
+				return {
+					format: "csv",
+					contentType: "text/csv",
+					content: [header, ...rows].join("\n"),
+				};
+			}
+			return {
+				format: "json",
+				contentType: "application/json",
+				content: JSON.stringify(alerts),
+			};
+		},
+	};
+}
+
+function thisEscapeCsv(value: string): string {
+	const escaped = value.replaceAll('"', '""');
+	return `"${escaped}"`;
+}
