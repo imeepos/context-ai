@@ -1,14 +1,14 @@
 {
-  "name": "@context-ai/ctp-lite",
+  "name": "@context-ai/ctp",
   "version": "0.1.0",
   "description": "Context Protocol Lite - Lightweight JSX-based context management for LLM agents",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": "./dist/src/index.js",
+      "types": "./dist/src/index.d.ts"
     }
   },
   "scripts": {

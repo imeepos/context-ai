@@ -26,7 +26,7 @@ export function parseStoryboardExcel(filePath: string): Storyboard[] {
     throw new Error('No worksheet in Excel file');
   }
 
-  const sheet = workbook.Sheets[sheetName];
+  const sheet = workbook.Sheets[sheetName]!;
   const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
 
   return rawData.map((row, index) => parseRowToStoryboard(row, index));
@@ -172,7 +172,7 @@ export function findExcelFile(dir: string): string | null {
  */
 export function formatStoryboards(storyboards: Storyboard[]): string {
   return storyboards
-    .map((s, i) => {
+    .map((s, _i) => {
       const parts = [`[Storyboard ${s.index}]`];
       if (s.scene) parts.push(`Scene: ${s.scene}`);
       if (s.character) parts.push(`Character: ${s.character}`);

@@ -80,6 +80,8 @@ export async function submitVideoTask(params: SubmitVideoTaskParams): Promise<Su
       ...(normalizedSeconds && {
         seconds: normalizedSeconds,
       }),
+      // @ts-ignore
+      extra_body: {}
     });
 
     // Get task ID from response

@@ -191,8 +191,8 @@ export class VideoAgent {
     // 获取最后一条助手消息
     const messages = this.agent.state.messages;
     for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i].role === 'assistant' && messages[i].content) {
-        return messages[i].content as string;
+      if (messages[i]!.role === 'assistant' && messages[i]!.content) {
+        return messages[i]!.content as string;
       }
     }
 

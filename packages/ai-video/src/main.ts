@@ -2,7 +2,7 @@
  * Main entry point for testing and development
  */
 import * as path from 'path';
-import { generatePrompt, scanInputDirectory, formatScanResult } from './utils/generatePrompt.js';
+import { generatePrompt } from './utils/generatePrompt.js';
 
 // Default input directory
 const DEFAULT_INPUT_DIR = './inputs';

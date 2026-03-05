@@ -66,17 +66,6 @@ export function buildPrompt(context: RenderedContext): string {
     for (const tool of context.tools) {
       lines.push(`### ${tool.name}`);
       lines.push(tool.description);
-
-      // Add risk level if not low
-      if (tool.risk && tool.risk !== 'low') {
-        lines.push(`[Risk Level: ${tool.risk}]`);
-      }
-
-      // Add confirmation warning if needed
-      if (tool.confirm) {
-        lines.push('⚠️ This tool requires confirmation before execution.');
-      }
-
       lines.push('');
     }
   }

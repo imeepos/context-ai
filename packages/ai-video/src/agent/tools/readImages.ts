@@ -2,7 +2,7 @@
  * Read reference images tool
  */
 import { Type } from '@sinclair/typebox';
-import type { AgentTool, AgentToolResult } from '@mariozechner/pi-agent-core';
+import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { scanImages } from '../../utils/fileUtils.js';
 import type { AgentContext } from '../../types.js';
 import { result } from './toolUtils.js';

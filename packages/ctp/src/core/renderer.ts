@@ -1,17 +1,16 @@
 import type {
   JSXElement,
   RenderedContext,
-  ToolDefinition,
   DataView,
-  DataProps,
-  ToolProps,
-  ContextProps,
-  GroupProps,
-  TextProps,
-  ExampleProps,
-  JSONSchema,
 } from './types';
+import type { ContextProps } from '../components/context';
+import type { DataProps } from '../components/data';
+import type { ToolProps } from '../components/tool';
+import type { GroupProps } from '../components/group';
+import type { TextProps } from '../components/text';
+import type { ExampleProps } from '../components/example';
 import { buildPrompt } from './builder';
+import type { AgentTool } from '@mariozechner/pi-agent-core';
 
 /**
  * Render a JSX element or function component into a RenderedContext
@@ -399,93 +398,8 @@ export function formatJSON(data: unknown[], fields?: string[]): string {
 /**
  * Create a ToolDefinition from ToolProps
  */
-export function createToolDefinition(props: ToolProps): ToolDefinition {
-  // Convert schema to JSONSchema if provided
-  let parameters: ToolDefinition['parameters'];
-
-  if (props.schema) {
-    // Convert Zod schema to JSON Schema (simplified)
-    parameters = zodToJSONSchema(props.schema);
-  } else if (props.params) {
-    // Use provided params
-    parameters = props.params;
-  } else {
-    // Default empty schema
-    parameters = {
-      type: 'object',
-      properties: {},
-      required: [],
-    };
-  }
-
-  return {
-    name: props.name,
-    description: props.description,
-    parameters,
-    execute: props.execute || (async () => { }),
-  };
-}
-
-/**
- * Convert a Zod schema to JSON Schema (simplified implementation)
- */
-function zodToJSONSchema(schema: unknown): ToolDefinition['parameters'] {
-  // This is a simplified implementation
-  // In a real implementation, this would use zod-to-json-schema or similar
-
-  // Check if it's a Zod schema by looking for common Zod methods
-  const zodSchema = schema as {
-    _def?: { typeName?: string };
-    shape?: Record<string, unknown>;
-    parse?: (value: unknown) => unknown;
-  };
-
-  if (!zodSchema || typeof zodSchema !== 'object') {
-    return { type: 'object', properties: {}, required: [] };
-  }
-
-  // Try to extract schema info
-  const typeName = zodSchema._def?.typeName;
-
-  if (typeName === 'ZodObject' && zodSchema.shape) {
-    const properties: Record<string, JSONSchema> = {};
-    const required: string[] = [];
-
-    for (const [key, value] of Object.entries(zodSchema.shape)) {
-      const fieldSchema = value as { _def?: { typeName?: string }; description?: string };
-      const fieldType = mapZodTypeToJSONType(fieldSchema._def?.typeName);
-
-      properties[key] = {
-        type: fieldType as JSONSchema['type'],
-        description: fieldSchema.description,
-      } as JSONSchema;
-      required.push(key);
-    }
-
-    return { type: 'object', properties, required };
-  }
-
-  return { type: 'object', properties: {}, required: [] };
-}
-
-/**
- * Map Zod type names to JSON Schema types
- */
-function mapZodTypeToJSONType(zodTypeName: string | undefined): string {
-  switch (zodTypeName) {
-    case 'ZodString':
-      return 'string';
-    case 'ZodNumber':
-      return 'number';
-    case 'ZodBoolean':
-      return 'boolean';
-    case 'ZodArray':
-      return 'array';
-    case 'ZodObject':
-      return 'object';
-    default:
-      return 'string';
-  }
+export function createToolDefinition(props: ToolProps): AgentTool {
+  return props;
 }
 
 /**
