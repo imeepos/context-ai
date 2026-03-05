@@ -1,5 +1,6 @@
 import type { LLMOSKernel } from "../kernel/index.js";
 import type { NetService } from "../net-service/index.js";
+import type { NotificationService, NotificationSeverity } from "../notification-service/index.js";
 import type { SchedulerService } from "../scheduler-service/index.js";
 import type { OSService } from "../types/os.js";
 
@@ -428,6 +429,43 @@ export function createSystemSchedulerFailuresService(
 				failures = failures.filter((item) => item.id === req.id);
 			}
 			return { failures };
+		},
+	};
+}
+
+export interface SystemAlertsRequest {
+	topic?: string;
+	severity?: NotificationSeverity;
+	limit?: number;
+}
+
+export interface SystemAlertsResponse {
+	total: number;
+	bySeverity: Partial<Record<NotificationSeverity, number>>;
+	alerts: ReturnType<NotificationService["query"]>;
+}
+
+export function createSystemAlertsService(
+	notificationService: NotificationService,
+): OSService<SystemAlertsRequest, SystemAlertsResponse> {
+	return {
+		name: "system.alerts",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const alerts = notificationService.query({
+				topic: req.topic,
+				severity: req.severity,
+				limit: req.limit,
+			});
+			const bySeverity: Partial<Record<NotificationSeverity, number>> = {};
+			for (const alert of alerts) {
+				bySeverity[alert.severity] = (bySeverity[alert.severity] ?? 0) + 1;
+			}
+			return {
+				total: alerts.length,
+				bySeverity,
+				alerts,
+			};
 		},
 	};
 }

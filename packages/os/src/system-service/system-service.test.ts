@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { LLMOSKernel } from "../kernel/index.js";
+import { EventBus } from "../kernel/event-bus.js";
 import { NetService } from "../net-service/index.js";
+import { NotificationService } from "../notification-service/index.js";
 import { PolicyEngine } from "../kernel/policy-engine.js";
 import { SchedulerService } from "../scheduler-service/index.js";
 import { SecurityService } from "../security-service/index.js";
@@ -12,6 +14,7 @@ import {
 	createSystemErrorsService,
 	createSystemEventsService,
 	createSystemMetricsService,
+	createSystemAlertsService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -339,5 +342,27 @@ describe("SystemService", () => {
 		);
 		expect(none.failures).toHaveLength(0);
 		vi.useRealTimers();
+	});
+
+	it("returns system alerts aggregation", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "a1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "a2", severity: "critical" });
+		notification.send({ topic: "business.info", message: "x", severity: "info" });
+
+		const service = createSystemAlertsService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", limit: 10 },
+			{
+				appId: "app.demo",
+				sessionId: "s12",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.total).toBe(2);
+		expect(response.bySeverity.error).toBe(1);
+		expect(response.bySeverity.critical).toBe(1);
 	});
 });

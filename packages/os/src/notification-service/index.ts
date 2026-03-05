@@ -1,13 +1,17 @@
 import type { EventBus } from "../kernel/event-bus.js";
 import type { OSService } from "../types/os.js";
 
+export type NotificationSeverity = "info" | "warning" | "error" | "critical";
+
 export interface NotifyRequest {
 	topic: string;
 	message: string;
+	severity?: NotificationSeverity;
 }
 
 export interface NotificationListRequest {
 	topic?: string;
+	severity?: NotificationSeverity;
 	limit?: number;
 }
 
@@ -15,67 +19,137 @@ export interface NotificationServiceOptions {
 	dedupeWindowMs?: number;
 }
 
+export interface NotificationRecord {
+	topic: string;
+	message: string;
+	severity: NotificationSeverity;
+	timestamp: string;
+}
+
+export interface MuteTopicRequest {
+	topic: string;
+	durationMs: number;
+}
+
 export class NotificationService {
-	private readonly sent: NotifyRequest[] = [];
+	private readonly sent: NotificationRecord[] = [];
 	private readonly lastSentAt = new Map<string, number>();
+	private readonly topicMuteUntil = new Map<string, number>();
 
 	constructor(
 		private readonly eventBus: EventBus,
 		private readonly options: NotificationServiceOptions = {},
 	) {}
 
-	send(request: NotifyRequest): void {
+	send(request: NotifyRequest): boolean {
+		if (this.isTopicMuted(request.topic)) {
+			return false;
+		}
+
+		const severity = request.severity ?? "info";
 		const dedupeWindowMs = this.options.dedupeWindowMs ?? 0;
 		if (dedupeWindowMs > 0) {
-			const key = `${request.topic}::${request.message}`;
+			const key = `${request.topic}::${severity}::${request.message}`;
 			const now = Date.now();
 			const last = this.lastSentAt.get(key);
 			if (last !== undefined && now - last <= dedupeWindowMs) {
-				return;
+				return false;
 			}
 			this.lastSentAt.set(key, now);
 		}
-		this.sent.push(request);
+		this.sent.push({
+			topic: request.topic,
+			message: request.message,
+			severity,
+			timestamp: new Date().toISOString(),
+		});
 		this.eventBus.publish(request.topic, {
 			message: request.message,
+			severity,
 		});
+		return true;
 	}
 
-	list(): NotifyRequest[] {
+	list(): NotificationRecord[] {
 		return [...this.sent];
 	}
 
-	query(request: NotificationListRequest): NotifyRequest[] {
+	query(request: NotificationListRequest): NotificationRecord[] {
 		let records = this.list();
 		if (request.topic) {
 			records = records.filter((record) => record.topic === request.topic);
+		}
+		if (request.severity) {
+			records = records.filter((record) => record.severity === request.severity);
 		}
 		if (request.limit && request.limit > 0) {
 			records = records.slice(-request.limit);
 		}
 		return records;
 	}
+
+	muteTopic(request: MuteTopicRequest): void {
+		this.topicMuteUntil.set(request.topic, Date.now() + request.durationMs);
+	}
+
+	unmuteTopic(topic: string): boolean {
+		return this.topicMuteUntil.delete(topic);
+	}
+
+	private isTopicMuted(topic: string): boolean {
+		const muteUntil = this.topicMuteUntil.get(topic);
+		if (muteUntil === undefined) return false;
+		if (Date.now() <= muteUntil) return true;
+		this.topicMuteUntil.delete(topic);
+		return false;
+	}
 }
 
-export function createNotificationSendService(notification: NotificationService): OSService<NotifyRequest, { sent: true }> {
+export function createNotificationSendService(
+	notification: NotificationService,
+): OSService<NotifyRequest, { sent: boolean }> {
 	return {
 		name: "notification.send",
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => {
-			notification.send(req);
-			return { sent: true };
+			return { sent: notification.send(req) };
 		},
 	};
 }
 
 export function createNotificationListService(
 	notification: NotificationService,
-): OSService<NotificationListRequest, { notifications: NotifyRequest[] }> {
+): OSService<NotificationListRequest, { notifications: NotificationRecord[] }> {
 	return {
 		name: "notification.list",
 		requiredPermissions: ["notification:read"],
 		execute: async (req) => ({
 			notifications: notification.query(req),
+		}),
+	};
+}
+
+export function createNotificationMuteService(
+	notification: NotificationService,
+): OSService<MuteTopicRequest, { muted: true }> {
+	return {
+		name: "notification.mute",
+		requiredPermissions: ["notification:write"],
+		execute: async (req) => {
+			notification.muteTopic(req);
+			return { muted: true };
+		},
+	};
+}
+
+export function createNotificationUnmuteService(
+	notification: NotificationService,
+): OSService<{ topic: string }, { unmuted: boolean }> {
+	return {
+		name: "notification.unmute",
+		requiredPermissions: ["notification:write"],
+		execute: async (req) => ({
+			unmuted: notification.unmuteTopic(req.topic),
 		}),
 	};
 }

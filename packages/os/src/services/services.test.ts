@@ -351,7 +351,9 @@ describe("NotificationService", () => {
 		const a = notification.query({ topic: "a" });
 		expect(a).toHaveLength(2);
 		const last = notification.query({ limit: 1 });
-		expect(last).toEqual([{ topic: "a", message: "m3" }]);
+		expect(last[0]?.topic).toBe("a");
+		expect(last[0]?.message).toBe("m3");
+		expect(last[0]?.severity).toBe("info");
 	});
 
 	it("deduplicates same topic+message within window", () => {
@@ -365,6 +367,23 @@ describe("NotificationService", () => {
 		vi.advanceTimersByTime(1001);
 		notification.send({ topic: "system.alert", message: "same" });
 		expect(notification.list()).toHaveLength(2);
+		vi.useRealTimers();
+	});
+
+	it("mutes topic within window and restores after expiration", () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.muteTopic({ topic: "system.alert", durationMs: 1000 });
+		const sent1 = notification.send({ topic: "system.alert", message: "drop", severity: "error" });
+		expect(sent1).toBe(false);
+		expect(notification.list()).toHaveLength(0);
+
+		vi.advanceTimersByTime(1001);
+		const sent2 = notification.send({ topic: "system.alert", message: "deliver", severity: "critical" });
+		expect(sent2).toBe(true);
+		expect(notification.list()).toHaveLength(1);
+		expect(notification.list()[0]?.severity).toBe("critical");
 		vi.useRealTimers();
 	});
 });

@@ -31,6 +31,7 @@ describe("createDefaultLLMOS", () => {
 					"scheduler:write",
 					"scheduler:read",
 					"notification:read",
+					"notification:write",
 					"shell:exec",
 				],
 				workingDirectory: root,
@@ -190,6 +191,16 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(listedAlerts.notifications.length).toBeGreaterThan(0);
+			const alertsSummary = await os.kernel.execute("system.alerts", { topic: "system.alert", limit: 10 }, context);
+			expect(alertsSummary.total).toBeGreaterThan(0);
+			await os.kernel.execute("notification.mute", { topic: "system.alert", durationMs: 1000 }, context);
+			const muted = await os.kernel.execute(
+				"notification.send",
+				{ topic: "system.alert", message: "muted-alert", severity: "error" },
+				context,
+			);
+			expect(muted.sent).toBe(false);
+			await os.kernel.execute("notification.unmute", { topic: "system.alert" }, context);
 
 			await os.kernel.execute("shell.env.set", { key: "AA", value: "BB" }, context);
 			const env = await os.kernel.execute("shell.env.list", { _: "list" }, context);

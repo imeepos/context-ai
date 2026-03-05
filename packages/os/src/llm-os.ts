@@ -31,7 +31,9 @@ import { NetService, createNetRequestService } from "./net-service/index.js";
 import {
 	NotificationService,
 	createNotificationListService,
+	createNotificationMuteService,
 	createNotificationSendService,
+	createNotificationUnmuteService,
 } from "./notification-service/index.js";
 import { PackageService, createPackageInstallService, createPackageListService } from "./package-service/index.js";
 import {
@@ -54,6 +56,7 @@ import {
 import { StoreService, createStoreGetService, createStoreSetService, type StoreValue } from "./store-service/index.js";
 import {
 	createSystemAuditService,
+	createSystemAlertsService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -208,6 +211,8 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("scheduler.failures.replay", () => createSchedulerFailuresReplayService(schedulerService));
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
 	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
+	registerWhenEnabled("notification.mute", () => createNotificationMuteService(notificationService));
+	registerWhenEnabled("notification.unmute", () => createNotificationUnmuteService(notificationService));
 	registerWhenEnabled("media.inspect", () => createMediaInspectService(mediaService));
 	registerWhenEnabled("ui.render", () => createUIRenderService(uiService));
 	registerWhenEnabled("model.generate", () => createModelGenerateService(modelService));
@@ -227,6 +232,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.net.circuit", () => createSystemNetCircuitService(netService));
 	registerWhenEnabled("system.net.circuit.reset", () => createSystemNetCircuitResetService(netService));
 	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
+	registerWhenEnabled("system.alerts", () => createSystemAlertsService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,
