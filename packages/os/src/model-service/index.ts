@@ -1,0 +1,43 @@
+import type { OSService } from "../types/os.js";
+
+export interface ModelGenerateRequest {
+	model: string;
+	prompt: string;
+	temperature?: number;
+}
+
+export interface ModelGenerateResponse {
+	model: string;
+	output: string;
+}
+
+export interface ModelProvider {
+	name: string;
+	generate(request: ModelGenerateRequest): Promise<string>;
+}
+
+export class ModelService {
+	private readonly providers = new Map<string, ModelProvider>();
+
+	register(provider: ModelProvider): void {
+		this.providers.set(provider.name, provider);
+	}
+
+	async generate(request: ModelGenerateRequest): Promise<ModelGenerateResponse> {
+		const provider = this.providers.get(request.model);
+		if (!provider) throw new Error(`Model provider not found: ${request.model}`);
+		const output = await provider.generate(request);
+		return {
+			model: request.model,
+			output,
+		};
+	}
+}
+
+export function createModelGenerateService(modelService: ModelService): OSService<ModelGenerateRequest, ModelGenerateResponse> {
+	return {
+		name: "model.generate",
+		requiredPermissions: ["model:invoke"],
+		execute: async (req) => modelService.generate(req),
+	};
+}

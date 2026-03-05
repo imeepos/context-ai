@@ -1,0 +1,322 @@
+# CTP LLM OS 顶层架构设计与功能规划
+
+## 实施状态（2026-03-06）
+- [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 69 passed, build: pass）
+- [x] M1: Kernel + 三大核心域（AppManager / FileService / ShellService）
+- [x] M2: NetService / StoreService / SchedulerService / SecurityService / NotificationService
+- [x] 统一工厂：`createDefaultLLMOS()` 与默认服务注册
+- [x] 安全治理：`PolicyEngine`（路径、命令、网络、权限）+ `AuditLog`
+- [x] 可观测基础：服务执行审计、Shell 执行审计、事件总线
+- [x] TDD：已引入 `vitest`，完成 69 个测试并通过
+- [x] P1: `MediaService / UIService / PackageService`
+- [x] P2: `HostAdapterRegistry`（位置/蓝牙/传感器插件化入口）
+- [x] Model 运行服务：`ModelService`（provider registry + 统一调用）
+- [x] 可观测增强：`KernelLogger`（结构化日志）+ Trace ID 贯穿执行
+- [x] 错误治理：`OSError` + 统一错误码（权限/策略/执行）
+- [x] 失败自动告警：`kernel.service.failed -> NotificationService(system.alert)`
+- [x] 调度增强：`SchedulerService.scheduleRetryable()`（重试/退避）
+- [x] 存储增强：Store Adapter（memory/json-file/sqlite-like）
+- [x] CTP 集成收口：`OSService -> CTP Tool` 适配器（`createCTPTool`）
+- [x] 多租户资源治理：`TenantQuotaGovernor` + `AppQuotaGovernor` 接入 kernel 执行链
+- [x] 文件能力补齐：`file.list/find/grep/edit` 统一纳入 `FileService`
+- [x] Shell 执行档位：`ExecutionProfile`（standard/restricted/read-only）
+- [x] 统一响应封装：CTP Tool 返回 `{ result, meta, audit }`
+- [x] 可观测指标：`KernelMetrics`（success rate / error rate / p95）
+- [x] 错误语义完善：服务缺失统一 `E_SERVICE_NOT_FOUND`
+- [x] 插件市场签名机制：`PackageService` 支持签名校验（可配置）
+- [x] 依赖链落地：`NetService` 请求审计通过 `StoreService` 持久化（net.journal）
+- [x] 调度链路落地：`SchedulerService` 发布 retried/succeeded/failed 事件并联动告警
+- [x] 服务启停治理：`createDefaultLLMOS({ enabledServices })` 支持按服务开关注册
+- [x] 运维可观测入口：`system.health` 服务输出服务列表与指标快照
+- [x] 应用声明强校验：未注册应用拒绝执行 + 上下文权限必须受 Manifest 授权
+- [x] 应用生命周期补齐：`app.disable/app.enable/app.uninstall` 与执行链联动
+- [x] 网络策略补齐：Domain + Method + RateLimit（PolicyEngine/NetService）
+- [x] 服务依赖治理：注册时依赖校验 + 依赖图查询（ServiceRegistry）
+- [x] 系统依赖可视化：`system.dependencies` 暴露服务依赖图
+- [x] 外部消费文档：`packages/os/README.md` 重写为可运行指南
+- [x] 策略拒绝错误码化：统一抛出 `E_POLICY_DENIED` 并进入审计链
+- [x] 运维指标查询：`system.metrics` 支持全量/单服务指标读取
+- [x] 权限一致性校验覆盖：`E_APP_PERMISSION_MISMATCH` 增加集成测试
+- [x] 审计查询能力：`system.audit` 支持按 session/trace/service 过滤
+- [x] 调度服务对外化：新增 `scheduler.scheduleOnce / scheduler.scheduleInterval` kernel 服务
+- [x] 调度可观测补齐：新增 `scheduler.list` 服务
+- [x] CTP 批量适配：`createCTPToolsFromKernel()` 支持一键导出工具清单
+- [x] 系统拓扑查询：`system.topology` 输出 services + deps + metrics
+- [x] 通知查询能力：`notification.list` 支持 topic/limit 过滤
+- [x] 事件历史查询：`system.events` 支持 topic/limit 检索 EventBus 历史
+- [x] 启动顺序可视化：`ServiceRegistry.bootOrder()` 并接入 `system.topology`
+- [x] 能力注册可查询：`system.capabilities` 读取 App 能力集合
+- [x] 应用升级能力：`app.upgrade` 支持版本/权限升级并同步能力表
+- [x] 批量服务编排：`ServiceRegistry.registerMany()` 支持同批依赖解析与环检测
+- [x] Shell 会话隔离对外化：`shell.env.set / shell.env.unset / shell.env.list`
+- [x] 策略快照查询：`system.policy` 暴露当前 PolicyEngine 生效规则
+- [x] 一体化诊断：`system.snapshot` 聚合 health/topology/policy/audit 摘要
+- [x] 能力全量查询：`system.capabilities.list` + capability remove/listAll
+- [x] 错误聚合查询：`system.errors` 支持按服务统计失败错误码
+- [x] 策略预判接口：`system.policy.evaluate` 支持无副作用策略评估
+
+## 0. 目标与范围
+- 目标：在 `packages/os` 中构建一个由大模型驱动的“操作系统层”，为 CTP Agent 提供统一的系统能力编排。
+- 范围：优先落地三大核心域
+1. 应用管理（Application Management）
+2. 文件管理（File Management）
+3. 命令行工具（Shell / CLI Tools）
+- 约束：遵循真实操作系统“上层依赖下层”的原则，适配 CTP 的工具调用模型与跨运行时特性。
+
+## 1. 现状基线（Current Baseline）
+- 当前入口 `src/index.ts` 仅导出：
+1. `file-manager`
+2. `bash`
+- 已有基础能力：
+1. 文件工具：`read / write / ls / find / grep / edit`
+2. 命令执行：`bash`（带超时、中止、输出截断、临时日志）
+3. 基础配置：`settings-manager`、`config`
+4. 辅助工具：路径、mime、图像、外部二进制工具管理（`fd`、`rg`）
+- 缺口：缺少完整“系统层”设计，尤其是应用生命周期、权限、安全、任务调度、事件总线、服务注册与治理。
+
+## 2. LLM OS 分层架构（类比真实 OS）
+
+```text
+┌────────────────────────────────────────────────────────────┐
+│ 应用层 Application Layer                                  │
+│  - Chat App / Workflow App / Plugin App                  │
+└───────────────────────┬────────────────────────────────────┘
+                        │
+┌───────────────────────▼────────────────────────────────────┐
+│ 交互层 Interaction Layer                                   │
+│  - 会话 UI 协议 / CLI / Tool-call 路由                    │
+└───────────────────────┬────────────────────────────────────┘
+                        │ 依赖系统服务
+┌───────────────────────▼────────────────────────────────────┐
+│ 系统服务层 System Services                                 │
+│  - AppManager / FileService / ShellService                │
+│  - NetService / StoreService / NotifyService              │
+│  - ModelService / PolicyService / Scheduler               │
+└───────────────────────┬────────────────────────────────────┘
+                        │ 通过抽象接口访问宿主能力
+┌───────────────────────▼────────────────────────────────────┐
+│ 运行时抽象层 Runtime HAL                                   │
+│  - FS Adapter / Process Adapter / HTTP Adapter            │
+│  - DB Adapter / Secret Adapter / Timer Adapter            │
+└───────────────────────┬────────────────────────────────────┘
+                        │
+┌───────────────────────▼────────────────────────────────────┐
+│ 宿主层 Host Environment                                   │
+│  - Node/Bun/Deno + OS(Windows/Linux/macOS)               │
+└────────────────────────────────────────────────────────────┘
+```
+
+对应关系（真实 OS -> CTP LLM OS）：
+- Hardware -> Host Environment
+- HAL -> Runtime Adapters
+- System Services -> OS Services（工具与能力治理）
+- UI Layer -> CTP 会话与调用协议层
+- Application -> Agent App / Skills / Plugins
+
+## 3. 核心子系统设计
+
+## 3.1 应用管理（AppManager）[P0]
+职责：
+1. 应用注册、安装、卸载、升级、禁用
+2. 应用生命周期：`install -> resolve -> activate -> run -> suspend -> stop`
+3. 应用声明文件（Manifest）校验
+4. 应用权限申请与授权缓存
+5. 应用资源配额（token、CPU 时间、工具调用次数、文件访问范围）
+
+关键对象：
+1. `AppManifest`
+2. `AppInstance`
+3. `AppPermission`
+4. `AppPolicy`
+
+建议文件结构：
+- `src/app-manager/registry.ts`
+- `src/app-manager/lifecycle.ts`
+- `src/app-manager/manifest.ts`
+- `src/app-manager/permissions.ts`
+- `src/app-manager/quota.ts`
+
+## 3.2 文件管理（FileService）[P0]
+职责：
+1. 统一封装当前已有文件工具
+2. 路径沙箱（workspace allowlist / denylist）
+3. 原子写入与并发锁
+4. 版本快照与可回滚编辑（edit + diff）
+5. 大文件流式读写与分块策略
+
+接口分层：
+1. User API：`read/write/edit/find/grep/ls`
+2. Guard Layer：权限、路径校验、大小阈值控制
+3. Adapter Layer：Node FS / 未来可扩展远端存储
+
+建议文件结构：
+- `src/file-service/index.ts`
+- `src/file-service/guard.ts`
+- `src/file-service/transaction.ts`
+- `src/file-service/snapshot.ts`
+
+## 3.3 命令行工具（ShellService）[P0]
+职责：
+1. 统一 shell 执行入口（复用 `bash.ts`）
+2. 命令白名单/黑名单策略
+3. 会话级环境变量隔离
+4. 输出流治理（截断、持久化、检索）
+5. 可审计执行日志（命令、参数、退出码、耗时）
+
+增强点：
+1. `CommandPolicy`（危险命令拦截）
+2. `ExecutionProfile`（标准/受限/只读）
+3. `ShellSession`（会话复用）
+
+建议文件结构：
+- `src/shell-service/index.ts`
+- `src/shell-service/policy.ts`
+- `src/shell-service/session.ts`
+- `src/shell-service/audit.ts`
+
+## 4. 系统能力规划（类比 Android/iOS/Linux/Windows）
+
+## 4.1 P0（必须）
+1. 文件系统：`FileService`（已具备基础）
+2. 网络：`NetService`（HTTP 客户端、重试、超时、证书策略）
+3. 数据存储：`StoreService`（KV + SQLite 适配）
+4. 后台任务：`SchedulerService`（cron/queue/retry）
+5. 安全加密：`SecurityService`（密钥、签名、敏感信息脱敏）
+6. 通知：`EventBus + NotificationService`（系统内事件）
+
+## 4.2 P1（高优先）
+1. 媒体能力：`MediaService`（图像处理扩展，复用 photon）
+2. UI 协议能力：`UIService`（结构化渲染协议，不绑定具体前端）
+3. 插件市场：`PackageService`（应用源、签名、版本）
+
+## 4.3 P2（按需）
+1. 位置服务、蓝牙、传感器：通过 Host Adapter 插件化接入
+2. 图形渲染：面向前端宿主输出 Render Protocol
+
+## 5. 关键依赖链（落地版）
+
+1. 网络 -> 安全 -> 存储
+- `NetService` 所有出站请求必须走 `SecurityService`（签名、鉴权、脱敏）
+- 请求与响应摘要可落库到 `StoreService`
+
+2. 媒体 -> 文件系统 -> 渲染协议
+- 媒体输入来自 `FileService`
+- 处理结果统一输出为文件引用 + 元数据
+
+3. 通知 -> 调度器 -> 应用生命周期
+- `SchedulerService` 触发后台任务
+- 任务状态通过 `EventBus` 推送到应用
+
+4. 应用 -> 权限 -> 工具执行
+- `AppManager` 根据权限策略授权工具调用
+- `ShellService/FileService/NetService` 二次校验
+
+## 6. CTP 集成设计（重点）
+
+统一能力注册中心：
+- `src/kernel/service-registry.ts`
+- `src/kernel/capability-registry.ts`
+
+统一调用协议：
+1. CTP Context 产出 tool schema
+2. OS Kernel 负责路由到具体 Service
+3. Service 返回标准响应对象（含 `result/meta/audit`）
+
+建议接口：
+```ts
+interface OSService<Request, Response> {
+  name: string;
+  execute(req: Request, ctx: OSContext): Promise<Response>;
+}
+
+interface OSContext {
+  appId: string;
+  sessionId: string;
+  permissions: string[];
+  workingDirectory: string;
+}
+```
+
+## 7. 安全与治理模型
+
+策略层（Policy Engine）：
+1. 路径访问策略（Path Policy）
+2. 命令执行策略（Command Policy）
+3. 网络访问策略（Domain / Method / Rate Policy）
+4. 数据脱敏策略（Secret Redaction Policy）
+
+审计层（Audit）：
+1. 每次 tool call 生成审计记录
+2. 支持按 `appId/sessionId/toolName` 检索
+3. 关键失败自动上报到 `NotificationService`
+
+## 8. 可观测性与 SLO
+
+核心指标：
+1. Tool 调用成功率
+2. P95 执行时延
+3. 错误率（按服务维度）
+4. 重试命中率
+5. 输出截断比例（bash/file）
+
+日志标准：
+1. 结构化 JSON 日志
+2. Trace ID 贯穿一次 agent turn
+3. 关键服务统一错误码
+
+## 9. 代码组织建议（目标目录）
+
+```text
+packages/os/src
+  /kernel
+    service-registry.ts
+    capability-registry.ts
+    policy-engine.ts
+    event-bus.ts
+  /app-manager
+  /file-service
+  /shell-service
+  /net-service
+  /store-service
+  /security-service
+  /scheduler-service
+  /notification-service
+  /types
+  index.ts
+```
+
+入口导出建议：
+1. 先保留向后兼容导出（现有 `file-manager`、`bash`）
+2. 新增 `createLLMOSKernel()` 工厂
+3. 工厂支持按配置启停服务
+
+## 10. 里程碑（Roadmap）
+
+M1: Kernel + 三大核心域（P0）
+1. 完成 `AppManager/FileService/ShellService` 统一接口
+2. 接入 `PolicyEngine` 与 `Audit`
+3. 交付最小可运行 `createLLMOSKernel`
+
+M2: 系统能力扩展（P0 完整）
+1. `NetService/StoreService/SchedulerService/SecurityService`
+2. 事件与通知链路跑通
+
+M3: 平台化能力（P1）
+1. 插件市场与签名机制
+2. UI 协议与媒体能力增强
+
+M4: 高级能力（P2）
+1. Host 传感器类能力插件
+2. 多租户资源治理与配额系统完善
+
+## 11. 验收标准（Definition of Done）
+1. 三大核心域具备统一接口、权限控制、审计日志
+2. 任一应用可通过 Manifest 声明能力并被系统验证
+3. 关键服务具备集成测试（成功路径 + 权限拒绝 + 超时中止）
+4. 所有服务可通过 CTP tool 形式稳定调用
+5. 文档、类型定义、导出入口一致且可被外部包消费
+
+## 12. 下一步实施顺序（建议）
+1. 先实现 `kernel + app-manager`，建立治理中枢
+2. 将现有 `file-manager/bash` 迁入 `file-service/shell-service` 并适配统一上下文
+3. 补齐 `PolicyEngine + Audit`，再扩展网络与存储服务
