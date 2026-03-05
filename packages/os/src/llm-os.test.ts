@@ -201,6 +201,8 @@ describe("createDefaultLLMOS", () => {
 			expect(alertsExport.contentType).toBe("application/json");
 			const alertsStats = await os.kernel.execute("system.alerts.stats", {}, context);
 			expect(typeof alertsStats.stats.sent).toBe("number");
+			const alertsTopics = await os.kernel.execute("system.alerts.topics", {}, context);
+			expect(typeof alertsTopics.topics).toBe("object");
 			const clearedAlerts = await os.kernel.execute(
 				"system.alerts.clear",
 				{ topic: "system.alert", severity: "error" },

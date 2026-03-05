@@ -569,6 +569,45 @@ export function createSystemAlertsStatsService(
 	};
 }
 
+export interface SystemAlertsTopicsResponse {
+	topics: Record<
+		string,
+		{
+			sent: number;
+			dropped: number;
+			total: number;
+		}
+	>;
+}
+
+export function createSystemAlertsTopicsService(
+	notificationService: NotificationService,
+): OSService<Record<string, never>, SystemAlertsTopicsResponse> {
+	return {
+		name: "system.alerts.topics",
+		requiredPermissions: ["system:read"],
+		execute: async () => {
+			const byTopic = notificationService.getStats().byTopic;
+			const topics: Record<
+				string,
+				{
+					sent: number;
+					dropped: number;
+					total: number;
+				}
+			> = {};
+			for (const [topic, counts] of Object.entries(byTopic)) {
+				topics[topic] = {
+					sent: counts.sent,
+					dropped: counts.dropped,
+					total: counts.sent + counts.dropped,
+				};
+			}
+			return { topics };
+		},
+	};
+}
+
 function thisEscapeCsv(value: string): string {
 	const escaped = value.replaceAll('"', '""');
 	return `"${escaped}"`;

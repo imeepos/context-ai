@@ -18,6 +18,7 @@ import {
 	createSystemAlertsClearService,
 	createSystemAlertsExportService,
 	createSystemAlertsStatsService,
+	createSystemAlertsTopicsService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -463,6 +464,32 @@ describe("SystemService", () => {
 		);
 		expect(response.stats.sent).toBe(1);
 		expect(response.stats.dropped.rateLimited).toBe(1);
+		vi.useRealTimers();
+	});
+
+	it("returns alert topic aggregates", async () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			rateLimit: { limit: 1, windowMs: 1000 },
+		});
+		notification.send({ topic: "system.alert", message: "a1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "a2", severity: "error" });
+		notification.send({ topic: "ops.alert", message: "b1", severity: "warning" });
+
+		const service = createSystemAlertsTopicsService(notification);
+		const response = await service.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s16",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.topics["system.alert"]?.sent).toBe(1);
+		expect(response.topics["system.alert"]?.dropped).toBe(1);
+		expect(response.topics["ops.alert"]?.sent).toBe(1);
 		vi.useRealTimers();
 	});
 });
