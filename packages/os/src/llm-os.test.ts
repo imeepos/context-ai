@@ -422,4 +422,45 @@ describe("createDefaultLLMOS", () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	it("caps net journal size by configured limit", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-net-journal-"));
+		try {
+			const os = createDefaultLLMOS({
+				pathPolicy: { allow: [root], deny: [] },
+				netJournalLimit: 2,
+			});
+			const context = {
+				appId: "app.net-cap",
+				sessionId: "session-net-cap",
+				permissions: ["app:manage", "net:request", "store:read"],
+				workingDirectory: root,
+			};
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: context.appId,
+						name: "NetCap",
+						version: "1.0.0",
+						entry: "index.js",
+						permissions: context.permissions,
+					},
+				},
+				context,
+			);
+			vi.spyOn(globalThis, "fetch")
+				.mockResolvedValueOnce(new Response("ok-1", { status: 200 }))
+				.mockResolvedValueOnce(new Response("ok-2", { status: 200 }))
+				.mockResolvedValueOnce(new Response("ok-3", { status: 200 }));
+			await os.kernel.execute("net.request", { url: "https://example.com/a" }, context);
+			await os.kernel.execute("net.request", { url: "https://example.com/b" }, context);
+			await os.kernel.execute("net.request", { url: "https://example.com/c" }, context);
+			const journal = await os.kernel.execute("store.get", { key: "net.journal" }, context);
+			expect(Array.isArray(journal.value)).toBe(true);
+			expect(journal.value).toHaveLength(2);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 });

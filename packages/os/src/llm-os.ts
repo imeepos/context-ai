@@ -92,6 +92,7 @@ export interface DefaultLLMOS {
 export interface CreateDefaultLLMOSOptions {
 	pathPolicy?: PathPolicyRule;
 	packageSigningSecret?: string;
+	netJournalLimit?: number;
 	enabledServices?: Partial<Record<string, boolean>>;
 }
 
@@ -117,6 +118,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	const storeService = new StoreService();
 	const netService = new NetService(policy, securityService, async (entry) => {
 		const key = "net.journal";
+		const journalLimit = options.netJournalLimit ?? 1000;
 		const existing = (storeService.get(key) as StoreValue[] | undefined) ?? [];
 		const serializedEntry: StoreValue = {
 			url: entry.url,
@@ -128,7 +130,8 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 			error: entry.error ?? null,
 			timestamp: entry.timestamp,
 		};
-		storeService.set(key, [...existing, serializedEntry]);
+		const next = [...existing, serializedEntry];
+		storeService.set(key, next.slice(-journalLimit));
 	});
 	const schedulerService = new SchedulerService(kernel.events);
 	const notificationService = new NotificationService(kernel.events);
