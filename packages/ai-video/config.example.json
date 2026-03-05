@@ -1,0 +1,12 @@
+﻿{
+  "apiKey": "YOUR_API_KEY",
+  "baseURL": "https://ai.bowong.cc",
+  "chatModel": "volcengine/doubao-seed-2-0-pro-260215",
+  "outputDir": "./outputs",
+  "prompt": "",
+  "videoConfig": {
+    "model": "volcengine/doubao-seedance-1-0-pro-fast-251015",
+    "resolution": "1280x720",
+    "duration": 8
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "@context-ai/ai-video",
+  "version": "1.0.0",
+  "description": "AI Video Generation Agent - Automatically generate videos from storyboard files and reference images",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "ai-video": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli/index.js",
+    "main": "tsx src/cli/index.ts",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@mariozechner/pi-agent-core": "^0.55.4",
+    "@mariozechner/pi-ai": "^0.55.4",
+    "@sinclair/typebox": "^0.34.0",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "openai": "^6.25.0",
+    "ora": "^8.0.0",
+    "tsx": "^4.19.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "ai",
+    "video",
+    "agent",
+    "video-generation"
+  ],
+  "author": "Loomart",
+  "license": "MIT"
+}

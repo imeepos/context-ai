@@ -1,0 +1,53 @@
+{
+    "object": "list",
+    "data": [
+        {
+            "id": "azure/gpt-5.2-chat",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "azure"
+        },
+        {
+            "id": "google-vertex-ai/gemini-3-pro-preview",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "google-vertex-ai"
+        },
+        {
+            "id": "google-vertex-ai/veo-3.1-generate-001",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "google-vertex-ai"
+        },
+        {
+            "id": "google-vertex-ai/veo-3.1-fast-generate-001",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "google-vertex-ai"
+        },
+        {
+            "id": "volcengine/doubao-seed-2-0-pro-260215",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "volcengine"
+        },
+        {
+            "id": "volcengine/doubao-seed-2-0-lite-260215",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "volcengine"
+        },
+        {
+            "id": "volcengine/doubao-seedream-5-0-260128",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "volcengine"
+        },
+        {
+            "id": "volcengine/doubao-seedream-5-0-lite-260128",
+            "object": "model",
+            "created": 1772683908,
+            "provider": "volcengine"
+        }
+    ]
+}
