@@ -11,12 +11,30 @@ export interface NotificationListRequest {
 	limit?: number;
 }
 
+export interface NotificationServiceOptions {
+	dedupeWindowMs?: number;
+}
+
 export class NotificationService {
 	private readonly sent: NotifyRequest[] = [];
+	private readonly lastSentAt = new Map<string, number>();
 
-	constructor(private readonly eventBus: EventBus) {}
+	constructor(
+		private readonly eventBus: EventBus,
+		private readonly options: NotificationServiceOptions = {},
+	) {}
 
 	send(request: NotifyRequest): void {
+		const dedupeWindowMs = this.options.dedupeWindowMs ?? 0;
+		if (dedupeWindowMs > 0) {
+			const key = `${request.topic}::${request.message}`;
+			const now = Date.now();
+			const last = this.lastSentAt.get(key);
+			if (last !== undefined && now - last <= dedupeWindowMs) {
+				return;
+			}
+			this.lastSentAt.set(key, now);
+		}
 		this.sent.push(request);
 		this.eventBus.publish(request.topic, {
 			message: request.message,

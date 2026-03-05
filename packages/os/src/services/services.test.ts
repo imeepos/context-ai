@@ -330,4 +330,18 @@ describe("NotificationService", () => {
 		const last = notification.query({ limit: 1 });
 		expect(last).toEqual([{ topic: "a", message: "m3" }]);
 	});
+
+	it("deduplicates same topic+message within window", () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, { dedupeWindowMs: 1000 });
+		notification.send({ topic: "system.alert", message: "same" });
+		notification.send({ topic: "system.alert", message: "same" });
+		expect(notification.list()).toHaveLength(1);
+
+		vi.advanceTimersByTime(1001);
+		notification.send({ topic: "system.alert", message: "same" });
+		expect(notification.list()).toHaveLength(2);
+		vi.useRealTimers();
+	});
 });
