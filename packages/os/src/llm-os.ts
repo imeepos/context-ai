@@ -222,7 +222,12 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.policy.evaluate", () => createSystemPolicyEvaluateService(kernel));
 	registerWhenEnabled("system.net.circuit", () => createSystemNetCircuitService(netService));
 	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
-	registerWhenEnabled("system.snapshot", () => createSystemSnapshotService(kernel));
+	registerWhenEnabled("system.snapshot", () =>
+		createSystemSnapshotService(kernel, {
+			netService,
+			schedulerService,
+		}),
+	);
 	registerWhenEnabled("system.errors", () => createSystemErrorsService(kernel));
 
 	kernel.events.subscribe<{

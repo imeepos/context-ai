@@ -196,6 +196,8 @@ describe("SystemService", () => {
 		expect(response.topology.bootOrder).toContain("snap.demo");
 		expect(response.policy.pathRule).toBeDefined();
 		expect(response.latestAudit?.service).toBe("snap.demo");
+		expect(response.resilience.openNetCircuits).toBe(0);
+		expect(response.resilience.schedulerFailures).toBe(0);
 	});
 
 	it("returns aggregated errors", async () => {

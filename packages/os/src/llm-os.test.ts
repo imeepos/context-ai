@@ -158,6 +158,8 @@ describe("createDefaultLLMOS", () => {
 			vi.useRealTimers();
 			const snapshot = await os.kernel.execute("system.snapshot", {}, context);
 			expect(snapshot.health.services.length).toBeGreaterThan(0);
+			expect(snapshot.resilience.openNetCircuits).toBeGreaterThanOrEqual(0);
+			expect(snapshot.resilience.schedulerFailures).toBeGreaterThanOrEqual(0);
 			const errors = await os.kernel.execute("system.errors", {}, context);
 			expect(typeof errors.totalFailures).toBe("number");
 

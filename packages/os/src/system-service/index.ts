@@ -242,10 +242,18 @@ export interface SystemSnapshotResponse {
 		errorCode?: string;
 		timestamp: string;
 	};
+	resilience: {
+		openNetCircuits: number;
+		schedulerFailures: number;
+	};
 }
 
 export function createSystemSnapshotService(
 	kernel: LLMOSKernel,
+	deps?: {
+		netService?: NetService;
+		schedulerService?: SchedulerService;
+	},
 ): OSService<Record<string, never>, SystemSnapshotResponse> {
 	return {
 		name: "system.snapshot",
@@ -254,6 +262,9 @@ export function createSystemSnapshotService(
 			const services = kernel.services.list();
 			const metrics = kernel.metrics.allSnapshots();
 			const latestAudit = kernel.audit.list().at(-1);
+			const netCircuits = deps?.netService?.getCircuitSnapshot() ?? {};
+			const openNetCircuits = Object.values(netCircuits).filter((item) => item.state === "open").length;
+			const schedulerFailures = deps?.schedulerService?.listFailures().length ?? 0;
 			return {
 				health: {
 					services,
@@ -273,6 +284,10 @@ export function createSystemSnapshotService(
 							timestamp: latestAudit.timestamp,
 						}
 					: undefined,
+				resilience: {
+					openNetCircuits,
+					schedulerFailures,
+				},
 			};
 		},
 	};

@@ -8,6 +8,7 @@
 - [x] M5(稳定性阶段)-4: Notification 去重窗口（dedupe window）防告警风暴
 - [x] M5(稳定性阶段)-5: `net.journal` 容量上限（ring buffer）防止存储无限增长
 - [x] M5(稳定性阶段)-6: DLQ 重放能力 `scheduler.failures.replay` + replay 事件
+- [x] M5(稳定性阶段)-7: `system.snapshot` 增加稳定性摘要（open circuit / scheduler failures）
 - [x] M1: Kernel + 三大核心域（AppManager / FileService / ShellService）
 - [x] M2: NetService / StoreService / SchedulerService / SecurityService / NotificationService
 - [x] 统一工厂：`createDefaultLLMOS()` 与默认服务注册
