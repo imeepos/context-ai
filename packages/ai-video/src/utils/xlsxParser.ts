@@ -2,10 +2,16 @@
  * Excel storyboard file parser
  */
 
-import XLSX from 'xlsx';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawnSync } from 'child_process';
+import { fileURLToPath } from 'url';
 import type { Storyboard } from '../types.js';
+
+const ALLOWED_EXCEL_EXTENSIONS = ['.xlsx'];
+const MAX_EXCEL_BYTES = Number(process.env.AI_VIDEO_MAX_EXCEL_BYTES || 5 * 1024 * 1024);
+const PARSE_TIMEOUT_MS = Number(process.env.AI_VIDEO_EXCEL_PARSE_TIMEOUT_MS || 5000);
+const WORKER_STDIO_MAX_BYTES = Number(process.env.AI_VIDEO_EXCEL_WORKER_STDIO_MAX_BYTES || 2 * 1024 * 1024);
 
 /**
  * Parse Excel storyboard file
@@ -17,131 +23,56 @@ export function parseStoryboardExcel(filePath: string): Storyboard[] {
     throw new Error(`File does not exist: ${filePath}`);
   }
 
-  // Read file content
-  const fileBuffer = fs.readFileSync(filePath);
-  const workbook = XLSX.read(fileBuffer, { type: 'buffer' });
-  const sheetName = workbook.SheetNames[0];
-
-  if (!sheetName) {
-    throw new Error('No worksheet in Excel file');
+  const ext = path.extname(filePath).toLowerCase();
+  if (!ALLOWED_EXCEL_EXTENSIONS.includes(ext)) {
+    throw new Error(`Unsupported Excel extension: ${ext}. Only .xlsx is allowed`);
   }
 
-  const sheet = workbook.Sheets[sheetName]!;
-  const rawData = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
+  const stat = fs.statSync(filePath);
+  if (stat.size > MAX_EXCEL_BYTES) {
+    throw new Error(
+      `Excel file too large: ${stat.size} bytes (max ${MAX_EXCEL_BYTES} bytes). ` +
+      'Set AI_VIDEO_MAX_EXCEL_BYTES to override if needed'
+    );
+  }
 
-  return rawData.map((row, index) => parseRowToStoryboard(row, index));
-}
+  const workerPath = fileURLToPath(new URL('./xlsxSandboxWorker.js', import.meta.url));
+  const workerResult = spawnSync(process.execPath, [workerPath, filePath], {
+    encoding: 'utf8',
+    timeout: PARSE_TIMEOUT_MS,
+    maxBuffer: WORKER_STDIO_MAX_BYTES,
+  });
 
-/**
- * Convert raw row data to storyboard object
- */
-function parseRowToStoryboard(row: Record<string, unknown>, index: number): Storyboard {
-  // Try to match common column names
-  const storyboard: Storyboard = {
-    index: index + 1,
-    raw: row,
-  };
-
-  // Match index column
-  const indexKeys = ['index', 'no', 'number'];
-  for (const key of indexKeys) {
-    if (row[key] !== undefined) {
-      storyboard.index = Number(row[key]) || index + 1;
-      break;
+  if (workerResult.error) {
+    if (workerResult.error.name === 'Error' && workerResult.error.message.includes('ETIMEDOUT')) {
+      throw new Error(`Excel parse timed out after ${PARSE_TIMEOUT_MS}ms`);
     }
+    throw new Error(`Excel parse failed: ${workerResult.error.message}`);
   }
 
-  // Match scene column
-  const sceneKeys = ['scene', 'background'];
-  for (const key of sceneKeys) {
-    if (row[key] !== undefined) {
-      storyboard.scene = String(row[key]);
-      break;
-    }
+  if (workerResult.status !== 0) {
+    const reason = workerResult.stderr?.trim() || 'unknown error';
+    throw new Error(`Excel parse worker failed: ${reason}`);
   }
 
-  // Match character column
-  const characterKeys = ['character'];
-  for (const key of characterKeys) {
-    if (row[key] !== undefined) {
-      storyboard.character = String(row[key]);
-      break;
-    }
+  const stdout = workerResult.stdout?.trim();
+  if (!stdout) {
+    throw new Error('Excel parse worker returned empty output');
   }
 
-  // Match action column
-  const actionKeys = ['action'];
-  for (const key of actionKeys) {
-    if (row[key] !== undefined) {
-      storyboard.action = String(row[key]);
-      break;
-    }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(stdout);
+  } catch (error: any) {
+    throw new Error(`Excel parse worker returned invalid JSON: ${error.message}`);
   }
 
-  // Match shot column
-  const shotKeys = ['shot'];
-  for (const key of shotKeys) {
-    if (row[key] !== undefined) {
-      storyboard.shot = String(row[key]);
-      break;
-    }
+  const storyboards = (payload as { storyboards?: unknown }).storyboards;
+  if (!Array.isArray(storyboards)) {
+    throw new Error('Excel parse worker response missing storyboards array');
   }
 
-  // Match dialogue column
-  const dialogueKeys = ['dialogue'];
-  for (const key of dialogueKeys) {
-    if (row[key] !== undefined) {
-      storyboard.dialogue = String(row[key]);
-      break;
-    }
-  }
-
-  // Match duration column
-  const durationKeys = ['duration'];
-  for (const key of durationKeys) {
-    if (row[key] !== undefined) {
-      storyboard.duration = Number(row[key]) || undefined;
-      break;
-    }
-  }
-
-  // Match prompt column
-  const promptKeys = ['prompt', 'description'];
-  for (const key of promptKeys) {
-    if (row[key] !== undefined) {
-      storyboard.prompt = String(row[key]);
-      break;
-    }
-  }
-
-  // If no separate prompt, generate from storyboard data
-  if (!storyboard.prompt) {
-    storyboard.prompt = generatePromptFromStoryboard(storyboard);
-  }
-
-  return storyboard;
-}
-
-/**
- * Generate prompt from storyboard data
- */
-function generatePromptFromStoryboard(storyboard: Storyboard): string {
-  const parts: string[] = [];
-
-  if (storyboard.scene) {
-    parts.push(`Scene: ${storyboard.scene}`);
-  }
-  if (storyboard.character) {
-    parts.push(`Character: ${storyboard.character}`);
-  }
-  if (storyboard.action) {
-    parts.push(`Action: ${storyboard.action}`);
-  }
-  if (storyboard.shot) {
-    parts.push(`Shot: ${storyboard.shot}`);
-  }
-
-  return parts.length > 0 ? parts.join(', ') : `Storyboard ${storyboard.index}`;
+  return storyboards as Storyboard[];
 }
 
 /**
@@ -155,7 +86,7 @@ export function findExcelFile(dir: string): string | null {
   }
 
   const files = fs.readdirSync(dir);
-  const excelExtensions = ['.xlsx', '.xls'];
+  const excelExtensions = ALLOWED_EXCEL_EXTENSIONS;
 
   for (const file of files) {
     const ext = path.extname(file).toLowerCase();

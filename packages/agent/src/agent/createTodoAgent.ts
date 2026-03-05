@@ -1,4 +1,5 @@
-import { Agent, AgentTool } from '@mariozechner/pi-agent-core';
+import { Agent } from '@mariozechner/pi-agent-core';
+import type { AgentTool } from '@mariozechner/pi-agent-core';
 import { createCustomModel } from '../config/createCustomModel.js';
 import { getApiKey } from '../config/getApiKey.js';
 

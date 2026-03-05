@@ -25,7 +25,7 @@ export function scanInputDirectory(inputDir: string): InputScanResult {
 
     const files = fs.readdirSync(inputDir);
     const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'];
-    const excelExtensions = ['.xlsx', '.xls'];
+    const excelExtensions = ['.xlsx'];
 
     for (const file of files) {
         const filePath = path.join(inputDir, file);

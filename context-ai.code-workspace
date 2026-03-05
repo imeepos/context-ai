@@ -4,7 +4,13 @@
       "path": "."
     },
     {
-      "path": "packages/ctp-lite"
+      "path": "packages/ctp"
+    },
+    {
+      "path": "packages/agent"
+    },
+    {
+      "path": "packages/todo"
     },
     {
       "path": "packages/ai-video"
