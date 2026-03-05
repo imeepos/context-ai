@@ -386,4 +386,25 @@ describe("NotificationService", () => {
 		expect(notification.list()[0]?.severity).toBe("critical");
 		vi.useRealTimers();
 	});
+
+	it("filters notifications by since/until window", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "m1" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
+		notification.send({ topic: "system.alert", message: "m2" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:20.000Z"));
+		notification.send({ topic: "system.alert", message: "m3" });
+
+		const filtered = notification.query({
+			topic: "system.alert",
+			since: "2026-01-01T00:00:05.000Z",
+			until: "2026-01-01T00:00:15.000Z",
+		});
+		expect(filtered).toHaveLength(1);
+		expect(filtered[0]?.message).toBe("m2");
+		vi.useRealTimers();
+	});
 });

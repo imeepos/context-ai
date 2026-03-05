@@ -12,6 +12,8 @@ export interface NotifyRequest {
 export interface NotificationListRequest {
 	topic?: string;
 	severity?: NotificationSeverity;
+	since?: string;
+	until?: string;
 	limit?: number;
 }
 
@@ -86,6 +88,18 @@ export class NotificationService {
 		}
 		if (request.severity) {
 			records = records.filter((record) => record.severity === request.severity);
+		}
+		if (request.since) {
+			const sinceMs = Date.parse(request.since);
+			if (!Number.isNaN(sinceMs)) {
+				records = records.filter((record) => Date.parse(record.timestamp) >= sinceMs);
+			}
+		}
+		if (request.until) {
+			const untilMs = Date.parse(request.until);
+			if (!Number.isNaN(untilMs)) {
+				records = records.filter((record) => Date.parse(record.timestamp) <= untilMs);
+			}
 		}
 		if (request.limit && request.limit > 0) {
 			records = records.slice(-request.limit);

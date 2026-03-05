@@ -346,9 +346,12 @@ describe("SystemService", () => {
 	});
 
 	it("returns system alerts aggregation", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 		const bus = new EventBus();
 		const notification = new NotificationService(bus);
 		notification.send({ topic: "system.alert", message: "a1", severity: "error" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
 		notification.send({ topic: "system.alert", message: "a2", severity: "critical" });
 		notification.send({ topic: "business.info", message: "x", severity: "info" });
 
@@ -365,6 +368,22 @@ describe("SystemService", () => {
 		expect(response.total).toBe(2);
 		expect(response.bySeverity.error).toBe(1);
 		expect(response.bySeverity.critical).toBe(1);
+		const windowed = await service.execute(
+			{
+				topic: "system.alert",
+				since: "2026-01-01T00:00:05.000Z",
+				until: "2026-01-01T00:00:20.000Z",
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s12",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(windowed.total).toBe(1);
+		expect(windowed.alerts[0]?.message).toBe("a2");
+		vi.useRealTimers();
 	});
 
 	it("clears system alerts by filters", async () => {

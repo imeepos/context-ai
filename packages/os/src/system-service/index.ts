@@ -436,6 +436,8 @@ export function createSystemSchedulerFailuresService(
 export interface SystemAlertsRequest {
 	topic?: string;
 	severity?: NotificationSeverity;
+	since?: string;
+	until?: string;
 	limit?: number;
 }
 
@@ -455,6 +457,8 @@ export function createSystemAlertsService(
 			const alerts = notificationService.query({
 				topic: req.topic,
 				severity: req.severity,
+				since: req.since,
+				until: req.until,
 				limit: req.limit,
 			});
 			const bySeverity: Partial<Record<NotificationSeverity, number>> = {};
