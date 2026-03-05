@@ -155,6 +155,39 @@ describe("NetService", () => {
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 		vi.useRealTimers();
 	});
+
+	it("opens circuit breaker after consecutive failures and recovers after cooldown", async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValueOnce(new Error("net-1"))
+			.mockRejectedValueOnce(new Error("net-2"))
+			.mockResolvedValueOnce(new Response("ok", { status: 200 }));
+		const ctx: OSContext = {
+			appId: "app.net",
+			sessionId: "breaker-1",
+			permissions: ["net:request"],
+			workingDirectory: process.cwd(),
+		};
+		const net = new NetService(new PolicyEngine(), new SecurityService(), undefined, {
+			circuitBreaker: {
+				failureThreshold: 2,
+				cooldownMs: 1000,
+			},
+		});
+		await expect(net.request({ url: "https://example.com" }, ctx)).rejects.toThrow("net-1");
+		await expect(net.request({ url: "https://example.com" }, ctx)).rejects.toThrow("net-2");
+		await expect(net.request({ url: "https://example.com" }, ctx)).rejects.toMatchObject({
+			code: "E_NET_CIRCUIT_OPEN",
+		});
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+
+		await vi.advanceTimersByTimeAsync(1000);
+		const response = await net.request({ url: "https://example.com" }, ctx);
+		expect(response.status).toBe(200);
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		vi.useRealTimers();
+	});
 });
 
 describe("SchedulerService", () => {

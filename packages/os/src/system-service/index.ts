@@ -1,4 +1,5 @@
 import type { LLMOSKernel } from "../kernel/index.js";
+import type { NetService } from "../net-service/index.js";
 import type { OSService } from "../types/os.js";
 
 export interface SystemHealthResponse {
@@ -351,5 +352,21 @@ export function createSystemPolicyEvaluateService(
 				ctx,
 			);
 		},
+	};
+}
+
+export interface SystemNetCircuitResponse {
+	circuits: ReturnType<NetService["getCircuitSnapshot"]>;
+}
+
+export function createSystemNetCircuitService(
+	netService: NetService,
+): OSService<Record<string, never>, SystemNetCircuitResponse> {
+	return {
+		name: "system.net.circuit",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			circuits: netService.getCircuitSnapshot(),
+		}),
 	};
 }

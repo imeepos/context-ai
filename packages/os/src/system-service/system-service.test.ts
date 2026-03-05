@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { LLMOSKernel } from "../kernel/index.js";
+import { NetService } from "../net-service/index.js";
+import { PolicyEngine } from "../kernel/policy-engine.js";
+import { SecurityService } from "../security-service/index.js";
+import { vi } from "vitest";
 import {
 	createSystemAuditService,
 	createSystemCapabilitiesService,
@@ -7,6 +11,7 @@ import {
 	createSystemErrorsService,
 	createSystemEventsService,
 	createSystemMetricsService,
+	createSystemNetCircuitService,
 	createSystemPolicyEvaluateService,
 	createSystemPolicyService,
 	createSystemSnapshotService,
@@ -235,5 +240,33 @@ describe("SystemService", () => {
 			},
 		);
 		expect(commandDenied.allowed).toBe(false);
+	});
+
+	it("returns network circuit breaker state", async () => {
+		vi.useFakeTimers();
+		const fetchMock = vi
+			.spyOn(globalThis, "fetch")
+			.mockRejectedValueOnce(new Error("e1"))
+			.mockRejectedValueOnce(new Error("e2"));
+		const net = new NetService(new PolicyEngine(), new SecurityService(), undefined, {
+			circuitBreaker: {
+				failureThreshold: 2,
+				cooldownMs: 3000,
+			},
+		});
+		const ctx = {
+			appId: "app.demo",
+			sessionId: "s10",
+			permissions: ["system:read", "net:request"],
+			workingDirectory: process.cwd(),
+		};
+		await expect(net.request({ url: "https://example.com" }, ctx)).rejects.toThrow("e1");
+		await expect(net.request({ url: "https://example.com" }, ctx)).rejects.toThrow("e2");
+
+		const service = createSystemNetCircuitService(net);
+		const response = await service.execute({}, ctx);
+		expect(response.circuits["example.com"]?.state).toBe("open");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
 	});
 });

@@ -78,7 +78,8 @@ export type OSErrorCode =
 	| "E_SERVICE_EXECUTION"
 	| "E_QUOTA_EXCEEDED"
 	| "E_APP_NOT_REGISTERED"
-	| "E_APP_PERMISSION_MISMATCH";
+	| "E_APP_PERMISSION_MISMATCH"
+	| "E_NET_CIRCUIT_OPEN";
 
 export interface OSExecutionMeta {
 	service: string;

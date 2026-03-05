@@ -133,6 +133,8 @@ describe("createDefaultLLMOS", () => {
 			expect(policy.policy.pathRule).toBeDefined();
 			const policyEval = await os.kernel.execute("system.policy.evaluate", { command: "echo ok" }, context);
 			expect(policyEval.allowed).toBe(true);
+			const netCircuit = await os.kernel.execute("system.net.circuit", {}, context);
+			expect(netCircuit.circuits).toBeDefined();
 			const snapshot = await os.kernel.execute("system.snapshot", {}, context);
 			expect(snapshot.health.services.length).toBeGreaterThan(0);
 			const errors = await os.kernel.execute("system.errors", {}, context);
