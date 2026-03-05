@@ -10,8 +10,16 @@ interface TaskHandle {
 	stop: () => void;
 }
 
+export interface SchedulerFailureRecord {
+	id: string;
+	attempt: number;
+	error: string;
+	timestamp: string;
+}
+
 export class SchedulerService {
 	private readonly tasks = new Map<string, TaskHandle>();
+	private readonly failures: SchedulerFailureRecord[] = [];
 	constructor(private readonly eventBus?: EventBus) {}
 
 	publishEvent(topic: string, payload?: unknown): void {
@@ -61,6 +69,26 @@ export class SchedulerService {
 		return [...this.tasks.keys()];
 	}
 
+	listFailures(limit?: number): SchedulerFailureRecord[] {
+		if (!limit || limit <= 0) {
+			return [...this.failures];
+		}
+		return this.failures.slice(-limit);
+	}
+
+	clearFailures(id?: string): number {
+		if (!id) {
+			const count = this.failures.length;
+			this.failures.length = 0;
+			return count;
+		}
+		const before = this.failures.length;
+		const retained = this.failures.filter((item) => item.id !== id);
+		this.failures.length = 0;
+		this.failures.push(...retained);
+		return before - retained.length;
+	}
+
 	scheduleRetryable(
 		id: string,
 		task: () => Promise<void>,
@@ -84,10 +112,17 @@ export class SchedulerService {
 			} catch (error) {
 				if (attempt >= options.maxRetries) {
 					this.tasks.delete(id);
-					this.eventBus?.publish("scheduler.task.failed", {
+					const failureRecord: SchedulerFailureRecord = {
 						id,
 						attempt,
 						error: error instanceof Error ? error.message : String(error),
+						timestamp: new Date().toISOString(),
+					};
+					this.failures.push(failureRecord);
+					this.eventBus?.publish("scheduler.task.failed", {
+						id,
+						attempt,
+						error: failureRecord.error,
 					});
 					return;
 				}
@@ -136,6 +171,10 @@ export interface ScheduleIntervalRequest {
 	topic: string;
 	payload?: unknown;
 	maxRuns?: number;
+}
+
+export interface ClearSchedulerFailuresRequest {
+	id?: string;
 }
 
 export function createSchedulerCancelService(scheduler: SchedulerService): OSService<CancelTaskRequest, { cancelled: boolean }> {
@@ -188,5 +227,17 @@ export function createSchedulerScheduleIntervalService(
 			);
 			return { scheduled: true };
 		},
+	};
+}
+
+export function createSchedulerFailuresClearService(
+	scheduler: SchedulerService,
+): OSService<ClearSchedulerFailuresRequest, { cleared: number }> {
+	return {
+		name: "scheduler.failures.clear",
+		requiredPermissions: ["scheduler:write"],
+		execute: async (req) => ({
+			cleared: scheduler.clearFailures(req.id),
+		}),
 	};
 }

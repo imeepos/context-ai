@@ -37,6 +37,7 @@ import { PackageService, createPackageInstallService, createPackageListService }
 import {
 	SchedulerService,
 	createSchedulerCancelService,
+	createSchedulerFailuresClearService,
 	createSchedulerListService,
 	createSchedulerScheduleIntervalService,
 	createSchedulerScheduleOnceService,
@@ -62,6 +63,7 @@ import {
 	createSystemNetCircuitService,
 	createSystemPolicyEvaluateService,
 	createSystemPolicyService,
+	createSystemSchedulerFailuresService,
 	createSystemSnapshotService,
 	createSystemTopologyService,
 } from "./system-service/index.js";
@@ -194,6 +196,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("scheduler.scheduleInterval", () => createSchedulerScheduleIntervalService(schedulerService));
 	registerWhenEnabled("scheduler.cancel", () => createSchedulerCancelService(schedulerService));
 	registerWhenEnabled("scheduler.list", () => createSchedulerListService(schedulerService));
+	registerWhenEnabled("scheduler.failures.clear", () => createSchedulerFailuresClearService(schedulerService));
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
 	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
 	registerWhenEnabled("media.inspect", () => createMediaInspectService(mediaService));
@@ -213,6 +216,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.policy", () => createSystemPolicyService(kernel));
 	registerWhenEnabled("system.policy.evaluate", () => createSystemPolicyEvaluateService(kernel));
 	registerWhenEnabled("system.net.circuit", () => createSystemNetCircuitService(netService));
+	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
 	registerWhenEnabled("system.snapshot", () => createSystemSnapshotService(kernel));
 	registerWhenEnabled("system.errors", () => createSystemErrorsService(kernel));
 

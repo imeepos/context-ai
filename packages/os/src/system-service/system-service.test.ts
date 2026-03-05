@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { LLMOSKernel } from "../kernel/index.js";
 import { NetService } from "../net-service/index.js";
 import { PolicyEngine } from "../kernel/policy-engine.js";
+import { SchedulerService } from "../scheduler-service/index.js";
 import { SecurityService } from "../security-service/index.js";
 import { vi } from "vitest";
 import {
@@ -14,6 +15,7 @@ import {
 	createSystemNetCircuitService,
 	createSystemPolicyEvaluateService,
 	createSystemPolicyService,
+	createSystemSchedulerFailuresService,
 	createSystemSnapshotService,
 	createSystemTopologyService,
 } from "./index.js";
@@ -267,6 +269,32 @@ describe("SystemService", () => {
 		const response = await service.execute({}, ctx);
 		expect(response.circuits["example.com"]?.state).toBe("open");
 		expect(fetchMock).toHaveBeenCalledTimes(2);
+		vi.useRealTimers();
+	});
+
+	it("returns scheduler dead letter failures", async () => {
+		vi.useFakeTimers();
+		const scheduler = new SchedulerService();
+		scheduler.scheduleRetryable(
+			"dlq-1",
+			async () => {
+				throw new Error("dlq-error");
+			},
+			{ maxRetries: 0, backoffMs: 10 },
+		);
+		await vi.advanceTimersByTimeAsync(20);
+		const service = createSystemSchedulerFailuresService(scheduler);
+		const response = await service.execute(
+			{ limit: 10 },
+			{
+				appId: "app.demo",
+				sessionId: "s11",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.failures).toHaveLength(1);
+		expect(response.failures[0]?.id).toBe("dlq-1");
 		vi.useRealTimers();
 	});
 });

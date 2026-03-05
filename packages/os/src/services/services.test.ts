@@ -255,6 +255,54 @@ describe("SchedulerService", () => {
 		expect(scheduler.list()).toContain("list-1");
 		vi.useRealTimers();
 	});
+
+	it("stores failed retryable tasks in dead letter queue", async () => {
+		vi.useFakeTimers();
+		const scheduler = new SchedulerService();
+		scheduler.scheduleRetryable(
+			"job-dlq",
+			async () => {
+				throw new Error("hard-fail");
+			},
+			{ maxRetries: 1, backoffMs: 10 },
+		);
+		await vi.advanceTimersByTimeAsync(50);
+		const failures = scheduler.listFailures();
+		expect(failures).toHaveLength(1);
+		expect(failures[0]?.id).toBe("job-dlq");
+		expect(failures[0]?.error).toBe("hard-fail");
+		vi.useRealTimers();
+	});
+
+	it("clears dead letter records by id or all", async () => {
+		vi.useFakeTimers();
+		const scheduler = new SchedulerService();
+		scheduler.scheduleRetryable(
+			"job-clear-1",
+			async () => {
+				throw new Error("e1");
+			},
+			{ maxRetries: 0, backoffMs: 5 },
+		);
+		scheduler.scheduleRetryable(
+			"job-clear-2",
+			async () => {
+				throw new Error("e2");
+			},
+			{ maxRetries: 0, backoffMs: 5 },
+		);
+		await vi.advanceTimersByTimeAsync(30);
+		expect(scheduler.listFailures()).toHaveLength(2);
+
+		const removedOne = scheduler.clearFailures("job-clear-1");
+		expect(removedOne).toBe(1);
+		expect(scheduler.listFailures()).toHaveLength(1);
+
+		const removedAll = scheduler.clearFailures();
+		expect(removedAll).toBe(1);
+		expect(scheduler.listFailures()).toHaveLength(0);
+		vi.useRealTimers();
+	});
 });
 
 describe("NotificationService", () => {

@@ -135,6 +135,24 @@ describe("createDefaultLLMOS", () => {
 			expect(policyEval.allowed).toBe(true);
 			const netCircuit = await os.kernel.execute("system.net.circuit", {}, context);
 			expect(netCircuit.circuits).toBeDefined();
+			vi.useFakeTimers();
+			os.schedulerService.scheduleRetryable(
+				"job-dlq-int",
+				async () => {
+					throw new Error("dlq-int-error");
+				},
+				{ maxRetries: 0, backoffMs: 10 },
+			);
+			await vi.advanceTimersByTimeAsync(20);
+			const schedulerFailures = await os.kernel.execute("system.scheduler.failures", { limit: 10 }, context);
+			expect(schedulerFailures.failures.length).toBeGreaterThan(0);
+			const cleared = await os.kernel.execute(
+				"scheduler.failures.clear",
+				{ id: "job-dlq-int" },
+				context,
+			);
+			expect(cleared.cleared).toBeGreaterThan(0);
+			vi.useRealTimers();
 			const snapshot = await os.kernel.execute("system.snapshot", {}, context);
 			expect(snapshot.health.services.length).toBeGreaterThan(0);
 			const errors = await os.kernel.execute("system.errors", {}, context);

@@ -1,5 +1,6 @@
 import type { LLMOSKernel } from "../kernel/index.js";
 import type { NetService } from "../net-service/index.js";
+import type { SchedulerService } from "../scheduler-service/index.js";
 import type { OSService } from "../types/os.js";
 
 export interface SystemHealthResponse {
@@ -367,6 +368,26 @@ export function createSystemNetCircuitService(
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			circuits: netService.getCircuitSnapshot(),
+		}),
+	};
+}
+
+export interface SystemSchedulerFailuresRequest {
+	limit?: number;
+}
+
+export interface SystemSchedulerFailuresResponse {
+	failures: ReturnType<SchedulerService["listFailures"]>;
+}
+
+export function createSystemSchedulerFailuresService(
+	schedulerService: SchedulerService,
+): OSService<SystemSchedulerFailuresRequest, SystemSchedulerFailuresResponse> {
+	return {
+		name: "system.scheduler.failures",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => ({
+			failures: schedulerService.listFailures(req.limit),
 		}),
 	};
 }
