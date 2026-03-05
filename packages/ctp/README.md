@@ -142,6 +142,17 @@ console.log(ctx.dataViews); // 数据视图
 
 支持格式：`table` | `list` | `json` | `tree` | `csv`
 
+`Data` 在 `render()` 后会产生两层信息：
+- 数据正文（插入到 prompt 主体中）
+- 数据视图索引（出现在 prompt 尾部 `## Data Views`）
+
+`## Data Views` 的作用是给模型一个“数据目录”，快速说明：
+- 当前有哪些数据块（`title`）
+- 每个数据块用什么格式组织（`format`）
+- 可关注哪些字段（`fields`，如果提供）
+
+这能降低模型漏读或误读数据结构的概率，尤其在上下文较长时更明显。
+
 ### Tool
 
 定义 AI 可调用的工具。
@@ -217,6 +228,31 @@ interface RenderedContext {
   metadata?: Record<string, unknown>; // 元数据
 }
 ```
+
+## Prompt 尾部结构说明
+
+`buildPrompt()` 会在正文后追加两个可选区块：
+
+### 1) Data Views
+
+当 `context.dataViews.length > 0` 时，输出：
+- `## Data Views`
+- 每个 data view 的 `title` 与 `format`
+- 可选的 `Fields: ...`
+
+作用：作为“数据目录/摘要”，帮助模型快速定位数据来源和结构，而不是只依赖正文中的原始数据片段。
+
+### 2) Metadata
+
+当 `context.metadata` 非空时，输出：
+- `## Metadata`
+- 每个 `key: value` 键值对
+
+作用：承载全局背景信息（例如版本、作者、标签、运行环境标记等），与正文内容解耦，避免关键信号被埋在长文本里。
+
+简化理解：
+- `Data Views` = 数据目录
+- `Metadata` = 全局说明卡
 
 ## 设计原则
 

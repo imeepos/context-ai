@@ -26,6 +26,7 @@ export async function render(
     prompt: '',
     tools: [],
     dataViews: [],
+    metadata: {}
   };
 
   // Execute component if it's a function
@@ -115,6 +116,7 @@ export async function walkJSX(node: unknown, ctx: RenderedContext): Promise<void
 async function handleContext(props: ContextProps, ctx: RenderedContext): Promise<void> {
   ctx.name = props.name;
   ctx.description = props.description || '';
+  ctx.metadata = props.metadata as RenderedContext['metadata'];
 
   if (props.children) {
     await walkJSX(props.children, ctx);
@@ -157,6 +159,7 @@ async function handleData(props: DataProps, ctx: RenderedContext): Promise<void>
     source: data,
     format: (props.format as DataView['format']) || 'json',
     fields: props.fields,
+    title: props.title
   };
 
   ctx.dataViews.push(dataView);
@@ -222,6 +225,10 @@ export function formatText(children: unknown): string {
  * Format data for the prompt based on format type
  */
 export function formatDataPrompt(data: unknown[], props: DataProps): string {
+  if (props.render) {
+    return formatCustomList(data, props.render as (item: unknown, index: number) => string);
+  }
+
   const format = props.format || 'json';
 
   switch (format) {
@@ -237,6 +244,29 @@ export function formatDataPrompt(data: unknown[], props: DataProps): string {
     default:
       return formatJSON(data, props.fields);
   }
+}
+
+/**
+ * Format data using a custom item renderer
+ */
+export function formatCustomList(
+  data: unknown[],
+  renderItem: (item: unknown, index: number) => string
+): string {
+  if (!Array.isArray(data) || data.length === 0) {
+    return '*(No data)*';
+  }
+
+  return data
+    .map((item, index) => {
+      try {
+        return renderItem(item, index);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return `[Render Error #${index + 1}] ${message}`;
+      }
+    })
+    .join('\n');
 }
 
 /**
