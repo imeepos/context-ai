@@ -22,6 +22,7 @@ const os = createDefaultLLMOS({
   pathPolicy: { allow: [process.cwd()], deny: [] },
   packageSigningSecret: "optional-signing-secret",
   netJournalLimit: 1000,
+  notificationDedupeWindowMs: 1000,
   enabledServices: {
     "package.install": true,
     "host.execute": true,

@@ -1,7 +1,7 @@
 # CTP LLM OS 顶层架构设计与功能规划
 
 ## 实施状态（2026-03-06）
-- [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 77 passed, build: pass）
+- [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 78 passed, build: pass）
 - [x] M5(稳定性阶段)-1: NetService 熔断器（Circuit Breaker）+ `system.net.circuit` 运行态查询
 - [x] M5(稳定性阶段)-2: Scheduler 死信队列（DLQ）+ `system.scheduler.failures` 查询
 - [x] M5(稳定性阶段)-3: DLQ 运维动作 `scheduler.failures.clear`（按 id / 全量清理）
@@ -9,12 +9,13 @@
 - [x] M5(稳定性阶段)-5: `net.journal` 容量上限（ring buffer）防止存储无限增长
 - [x] M5(稳定性阶段)-6: DLQ 重放能力 `scheduler.failures.replay` + replay 事件
 - [x] M5(稳定性阶段)-7: `system.snapshot` 增加稳定性摘要（open circuit / scheduler failures）
+- [x] M5(稳定性阶段)-8: 工厂级通知去重配置 `notificationDedupeWindowMs`
 - [x] M1: Kernel + 三大核心域（AppManager / FileService / ShellService）
 - [x] M2: NetService / StoreService / SchedulerService / SecurityService / NotificationService
 - [x] 统一工厂：`createDefaultLLMOS()` 与默认服务注册
 - [x] 安全治理：`PolicyEngine`（路径、命令、网络、权限）+ `AuditLog`
 - [x] 可观测基础：服务执行审计、Shell 执行审计、事件总线
-- [x] TDD：已引入 `vitest`，完成 77 个测试并通过
+- [x] TDD：已引入 `vitest`，完成 78 个测试并通过
 - [x] P1: `MediaService / UIService / PackageService`
 - [x] P2: `HostAdapterRegistry`（位置/蓝牙/传感器插件化入口）
 - [x] Model 运行服务：`ModelService`（provider registry + 统一调用）

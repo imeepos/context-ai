@@ -94,6 +94,7 @@ export interface CreateDefaultLLMOSOptions {
 	pathPolicy?: PathPolicyRule;
 	packageSigningSecret?: string;
 	netJournalLimit?: number;
+	notificationDedupeWindowMs?: number;
 	enabledServices?: Partial<Record<string, boolean>>;
 }
 
@@ -135,7 +136,9 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		storeService.set(key, next.slice(-journalLimit));
 	});
 	const schedulerService = new SchedulerService(kernel.events);
-	const notificationService = new NotificationService(kernel.events);
+	const notificationService = new NotificationService(kernel.events, {
+		dedupeWindowMs: options.notificationDedupeWindowMs,
+	});
 	const mediaService = new MediaService();
 	const uiService = new UIService();
 	const modelService = new ModelService();

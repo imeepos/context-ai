@@ -468,4 +468,24 @@ describe("createDefaultLLMOS", () => {
 			await rm(root, { recursive: true, force: true });
 		}
 	});
+
+	it("applies notification dedupe window from factory options", async () => {
+		vi.useFakeTimers();
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-notify-dedupe-"));
+		try {
+			const os = createDefaultLLMOS({
+				pathPolicy: { allow: [root], deny: [] },
+				notificationDedupeWindowMs: 1000,
+			});
+			os.notificationService.send({ topic: "system.alert", message: "dup" });
+			os.notificationService.send({ topic: "system.alert", message: "dup" });
+			expect(os.notificationService.list()).toHaveLength(1);
+			vi.advanceTimersByTime(1001);
+			os.notificationService.send({ topic: "system.alert", message: "dup" });
+			expect(os.notificationService.list()).toHaveLength(2);
+		} finally {
+			vi.useRealTimers();
+			await rm(root, { recursive: true, force: true });
+		}
+	});
 });
