@@ -633,6 +633,7 @@ describe("AppManager", () => {
 		expect(reverted.ok).toBe(true);
 		expect(reverted.restoredVersion).toBe("1.0.0");
 		expect(manager.routes.resolve("todo://list").page.id).toBe("list");
+		expect(manager.getInstallReport("todo")?.version).toBe("1.0.0");
 		expect(() => manager.routes.resolve("todo://board")).toThrowError(
 			expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>),
 		);

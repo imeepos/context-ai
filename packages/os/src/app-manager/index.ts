@@ -234,6 +234,18 @@ export function createAppInstallRollbackService(
 			}
 			if (snapshot.previous) {
 				manager.install(snapshot.previous);
+				manager.setInstallReport({
+					appId: snapshot.previous.id,
+					version: snapshot.previous.version,
+					addedPages: snapshot.previous.entry.pages.map((page) => page.route),
+					addedPolicies: [...snapshot.previous.permissions],
+					addedObservability: [
+						`audit:${snapshot.previous.id}`,
+						`metrics:${snapshot.previous.id}`,
+						`events:${snapshot.previous.id}`,
+					],
+					rollbackToken: req.rollbackToken,
+				});
 				hooks?.onInstall?.(snapshot.previous);
 				return {
 					ok: true,
