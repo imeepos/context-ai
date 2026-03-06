@@ -245,6 +245,12 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(recommendations.recommendations.length).toBeGreaterThan(0);
+			const feed = await os.kernel.execute(
+				"system.alerts.feed",
+				{ topic: "system.alert", offset: 0, limit: 5 },
+				context,
+			);
+			expect(Array.isArray(feed.items)).toBe(true);
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(

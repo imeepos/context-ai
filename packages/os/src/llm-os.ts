@@ -78,6 +78,7 @@ import {
 	createSystemAlertsTimelineService,
 	createSystemAlertsHotspotsService,
 	createSystemAlertsRecommendationsService,
+	createSystemAlertsFeedService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -286,6 +287,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.alerts.recommendations", () =>
 		createSystemAlertsRecommendationsService(notificationService),
 	);
+	registerWhenEnabled("system.alerts.feed", () => createSystemAlertsFeedService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

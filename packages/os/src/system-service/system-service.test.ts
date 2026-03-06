@@ -31,6 +31,7 @@ import {
 	createSystemAlertsTimelineService,
 	createSystemAlertsHotspotsService,
 	createSystemAlertsRecommendationsService,
+	createSystemAlertsFeedService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -810,5 +811,28 @@ describe("SystemService", () => {
 		expect(response.recommendations.length).toBeGreaterThan(0);
 		expect(response.recommendations[0]?.title.length).toBeGreaterThan(0);
 		vi.useRealTimers();
+	});
+
+	it("returns paginated alert feed", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "f1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "f2", severity: "warning" });
+		notification.send({ topic: "system.alert", message: "f3", severity: "critical" });
+
+		const service = createSystemAlertsFeedService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", offset: 0, limit: 2 },
+			{
+				appId: "app.demo",
+				sessionId: "s29",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.total).toBe(3);
+		expect(response.items).toHaveLength(2);
+		expect(response.items[0]?.message).toBe("f3");
+		expect(response.hasMore).toBe(true);
 	});
 });
