@@ -491,4 +491,16 @@ describe("NotificationService", () => {
 		expect(cleaned.mutes).toBe(1);
 		vi.useRealTimers();
 	});
+
+	it("enforces retention limit for stored notifications", () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, { retentionLimit: 2 });
+		notification.send({ topic: "system.alert", message: "r1" });
+		notification.send({ topic: "system.alert", message: "r2" });
+		notification.send({ topic: "system.alert", message: "r3" });
+		const list = notification.query({ topic: "system.alert" });
+		expect(list).toHaveLength(2);
+		expect(list[0]?.message).toBe("r2");
+		expect(list[1]?.message).toBe("r3");
+	});
 });

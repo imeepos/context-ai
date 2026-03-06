@@ -20,6 +20,7 @@ import {
 	createSystemAlertsStatsService,
 	createSystemAlertsTopicsService,
 	createSystemAlertsUnackedService,
+	createSystemAlertsPolicyService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -514,5 +515,27 @@ describe("SystemService", () => {
 			},
 		);
 		expect(response.total).toBe(1);
+	});
+
+	it("returns alert policy snapshot", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			dedupeWindowMs: 1000,
+			rateLimit: { limit: 2, windowMs: 5000 },
+			retentionLimit: 100,
+		});
+		const service = createSystemAlertsPolicyService(notification);
+		const response = await service.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s18",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.policy.dedupeWindowMs).toBe(1000);
+		expect(response.policy.rateLimit?.limit).toBe(2);
+		expect(response.policy.retentionLimit).toBe(100);
 	});
 });

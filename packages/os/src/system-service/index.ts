@@ -640,6 +640,22 @@ export function createSystemAlertsUnackedService(
 	};
 }
 
+export interface SystemAlertsPolicyResponse {
+	policy: ReturnType<NotificationService["getPolicy"]>;
+}
+
+export function createSystemAlertsPolicyService(
+	notificationService: NotificationService,
+): OSService<Record<string, never>, SystemAlertsPolicyResponse> {
+	return {
+		name: "system.alerts.policy",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			policy: notificationService.getPolicy(),
+		}),
+	};
+}
+
 function thisEscapeCsv(value: string): string {
 	const escaped = value.replaceAll('"', '""');
 	return `"${escaped}"`;

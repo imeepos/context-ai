@@ -67,6 +67,7 @@ import {
 	createSystemAlertsStatsService,
 	createSystemAlertsTopicsService,
 	createSystemAlertsUnackedService,
+	createSystemAlertsPolicyService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -113,6 +114,7 @@ export interface CreateDefaultLLMOSOptions {
 		limit: number;
 		windowMs: number;
 	};
+	notificationRetentionLimit?: number;
 	enabledServices?: Partial<Record<string, boolean>>;
 }
 
@@ -157,6 +159,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	const notificationService = new NotificationService(kernel.events, {
 		dedupeWindowMs: options.notificationDedupeWindowMs,
 		rateLimit: options.notificationRateLimit,
+		retentionLimit: options.notificationRetentionLimit,
 	});
 	const mediaService = new MediaService();
 	const uiService = new UIService();
@@ -258,6 +261,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.alerts.stats", () => createSystemAlertsStatsService(notificationService));
 	registerWhenEnabled("system.alerts.topics", () => createSystemAlertsTopicsService(notificationService));
 	registerWhenEnabled("system.alerts.unacked", () => createSystemAlertsUnackedService(notificationService));
+	registerWhenEnabled("system.alerts.policy", () => createSystemAlertsPolicyService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

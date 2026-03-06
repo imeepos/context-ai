@@ -203,6 +203,8 @@ describe("createDefaultLLMOS", () => {
 			expect(typeof alertsStats.stats.sent).toBe("number");
 			const alertsTopics = await os.kernel.execute("system.alerts.topics", {}, context);
 			expect(typeof alertsTopics.topics).toBe("object");
+			const alertsPolicy = await os.kernel.execute("system.alerts.policy", {}, context);
+			expect(typeof alertsPolicy.policy.dedupeWindowMs).toBe("number");
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(
@@ -551,6 +553,22 @@ describe("createDefaultLLMOS", () => {
 			expect(os.notificationService.send({ topic: "system.alert", message: "r2" })).toBe(false);
 		} finally {
 			vi.useRealTimers();
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("applies notification retention limit from factory options", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-notify-retention-"));
+		try {
+			const os = createDefaultLLMOS({
+				pathPolicy: { allow: [root], deny: [] },
+				notificationRetentionLimit: 2,
+			});
+			os.notificationService.send({ topic: "system.alert", message: "x1" });
+			os.notificationService.send({ topic: "system.alert", message: "x2" });
+			os.notificationService.send({ topic: "system.alert", message: "x3" });
+			expect(os.notificationService.query({ topic: "system.alert" })).toHaveLength(2);
+		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
 	});

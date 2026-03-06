@@ -24,6 +24,7 @@ export interface NotificationServiceOptions {
 		limit: number;
 		windowMs: number;
 	};
+	retentionLimit?: number;
 }
 
 export interface NotificationRecord {
@@ -132,6 +133,11 @@ export class NotificationService {
 			acknowledged: false,
 			timestamp: new Date().toISOString(),
 		});
+		const retentionLimit = this.options.retentionLimit;
+		if (retentionLimit && retentionLimit > 0 && this.sent.length > retentionLimit) {
+			const overflow = this.sent.length - retentionLimit;
+			this.sent.splice(0, overflow);
+		}
 		this.eventBus.publish(request.topic, {
 			message: request.message,
 			severity,
@@ -275,6 +281,21 @@ export class NotificationService {
 			byTopic: Object.fromEntries(
 				Object.entries(this.stats.byTopic).map(([topic, value]) => [topic, { ...value }]),
 			),
+		};
+	}
+
+	getPolicy(): {
+		dedupeWindowMs: number;
+		rateLimit?: {
+			limit: number;
+			windowMs: number;
+		};
+		retentionLimit?: number;
+	} {
+		return {
+			dedupeWindowMs: this.options.dedupeWindowMs ?? 0,
+			rateLimit: this.options.rateLimit,
+			retentionLimit: this.options.retentionLimit,
 		};
 	}
 
