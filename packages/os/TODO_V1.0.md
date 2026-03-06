@@ -256,6 +256,7 @@ interface AppInstallDeltaReport {
 ## 11. V1.0.1 查漏补缺（本轮完成）
 - [x] 回滚状态导入强校验（快照结构、时间字段、install report 字段）
 - [x] 回滚状态导入唯一性校验（snapshot token、install report appId）
+- [x] 回滚状态恢复安全失败语义（坏持久化状态不抛错、返回 reason/errorCode）
 - [x] `system.app.rollback.gc` 支持 `dryRun` 与 `limit`
 - [x] `system.app.rollback.gc` 返回 `eligible/removed/remaining/dryRun`
 - [x] `system.app.rollback.stats` 支持 `soonToExpireWindowMs`

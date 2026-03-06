@@ -998,6 +998,56 @@ describe("createDefaultLLMOS", () => {
 		}
 	});
 
+	it("returns safe failure for invalid persisted rollback state", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-rollback-state-invalid-"));
+		try {
+			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
+			const context = {
+				appId: "app.invalid",
+				sessionId: "session-rollback-state-invalid",
+				permissions: ["app:manage", "app:read", "system:read", "system:write", "store:write"],
+				workingDirectory: root,
+			};
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "app.invalid",
+						name: "Invalid",
+						version: "1.0.0",
+						entry: "index.js",
+						permissions: context.permissions,
+					},
+				},
+				context,
+			);
+			await os.kernel.execute(
+				"store.set",
+				{
+					key: "system.app.rollback.state",
+					value: {
+						snapshots: [
+							{
+								token: "",
+								appId: "bad",
+								createdAt: "not-a-date",
+								expiresAt: "2026-01-01T00:00:00.000Z",
+							},
+						],
+						installReports: [],
+					},
+				},
+				context,
+			);
+			const recoveredState = await os.kernel.execute("system.app.rollback.state.recover", {}, context);
+			expect(recoveredState.recovered).toBe(false);
+			expect(recoveredState.reason).toBe("invalid_state");
+			expect(recoveredState.errorCode).toBe("E_VALIDATION_FAILED");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("supports rollback gc dry-run and stats window in default os flow", async () => {
 		const root = await mkdtemp(join(tmpdir(), "os-kernel-rollback-gc-"));
 		try {

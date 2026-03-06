@@ -352,17 +352,24 @@ export function createSystemAppRollbackStateRecoverService(
 	appManager: AppManager,
 	store: { get(key: string): unknown },
 	key = "system.app.rollback.state",
-): OSService<Record<string, never>, { recovered: boolean }> {
+): OSService<Record<string, never>, { recovered: boolean; reason?: string; errorCode?: string }> {
 	return {
 		name: "system.app.rollback.state.recover",
 		requiredPermissions: ["system:write"],
 		execute: async () => {
 			const raw = store.get(key);
 			if (!raw || typeof raw !== "object") {
-				return { recovered: false };
+				return { recovered: false, reason: "empty_state" };
 			}
-			appManager.importRollbackState(raw as ReturnType<AppManager["exportRollbackState"]>);
-			return { recovered: true };
+			try {
+				appManager.importRollbackState(raw as ReturnType<AppManager["exportRollbackState"]>);
+				return { recovered: true };
+			} catch (error) {
+				if (error instanceof OSError) {
+					return { recovered: false, reason: "invalid_state", errorCode: error.code };
+				}
+				throw error;
+			}
 		},
 	};
 }

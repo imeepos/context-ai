@@ -489,6 +489,51 @@ describe("SystemService", () => {
 		);
 		expect(recovered.recovered).toBe(true);
 		expect(recoverManager.getInstallReport("todo")?.version).toBe("1.0.0");
+
+		const seededInstall = createAppInstallService(recoverManager);
+		await seededInstall.execute(
+			{
+				manifest: {
+					id: "seeded",
+					name: "Seeded",
+					version: "1.0.0",
+					entry: "index.js",
+					permissions: ["app:manage"],
+				},
+			},
+			{
+				appId: "seeded",
+				sessionId: "s6-rollback-state-recover-invalid",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const recoverInvalid = createSystemAppRollbackStateRecoverService(recoverManager, {
+			get: () => ({
+				snapshots: [
+					{
+						token: "",
+						appId: "bad",
+						createdAt: "bad-date",
+						expiresAt: "2026-01-01T00:00:00.000Z",
+					},
+				],
+				installReports: [],
+			}),
+		});
+		const invalidRecovered = await recoverInvalid.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-state-recover-invalid",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(invalidRecovered.recovered).toBe(false);
+		expect(invalidRecovered.reason).toBe("invalid_state");
+		expect(invalidRecovered.errorCode).toBe("E_VALIDATION_FAILED");
+		expect(recoverManager.getInstallReport("seeded")?.version).toBe("1.0.0");
 	});
 
 	it("rejects invalid rollback import state", async () => {
