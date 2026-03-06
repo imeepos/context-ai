@@ -301,8 +301,14 @@ export function createSystemSnapshotService(
 
 export interface SystemErrorsRequest {
 	service?: string;
+	servicePrefix?: string;
+	errorCode?: string;
 	windowMinutes?: number;
 	limit?: number;
+	bucketMinutes?: number;
+	order?: "asc" | "desc";
+	offset?: number;
+	recentLimit?: number;
 }
 
 export interface SystemErrorsResponse {
@@ -326,6 +332,10 @@ export interface SystemErrorsResponse {
 		appId: string;
 		sessionId: string;
 	}>;
+	trend: Array<{
+		bucketStart: string;
+		count: number;
+	}>;
 }
 
 export function createSystemErrorsService(
@@ -342,6 +352,12 @@ export function createSystemErrorsService(
 			}
 			if (req.service) {
 				records = records.filter((record) => record.service === req.service);
+			}
+			if (req.servicePrefix) {
+				records = records.filter((record) => record.service.startsWith(req.servicePrefix!));
+			}
+			if (req.errorCode) {
+				records = records.filter((record) => (record.errorCode ?? "UNKNOWN") === req.errorCode);
 			}
 			if (req.limit && req.limit > 0 && records.length > req.limit) {
 				records = records.slice(-req.limit);
@@ -369,8 +385,16 @@ export function createSystemErrorsService(
 				.map(([reason, count]) => ({ reason, count }))
 				.sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason))
 				.slice(0, 10);
-			const recent = records
-				.slice(-20)
+			const recentOrder = req.order === "asc" ? "asc" : "desc";
+			const recentOffset = req.offset && req.offset > 0 ? req.offset : 0;
+			const recentLimit = req.recentLimit && req.recentLimit > 0 ? req.recentLimit : 20;
+			const recent = [...records]
+				.sort((a, b) =>
+					recentOrder === "asc"
+						? Date.parse(a.timestamp) - Date.parse(b.timestamp)
+						: Date.parse(b.timestamp) - Date.parse(a.timestamp),
+				)
+				.slice(recentOffset, recentOffset + recentLimit)
 				.map((record) => ({
 					timestamp: record.timestamp,
 					service: record.service,
@@ -379,8 +403,23 @@ export function createSystemErrorsService(
 					error: record.error,
 					appId: record.appId,
 					sessionId: record.sessionId,
-				}))
-				.reverse();
+				}));
+			const trend: Array<{ bucketStart: string; count: number }> = [];
+			if (req.bucketMinutes && req.bucketMinutes > 0) {
+				const bucketMs = req.bucketMinutes * 60 * 1000;
+				const buckets = new Map<number, number>();
+				for (const record of records) {
+					const ts = Date.parse(record.timestamp);
+					const bucketStartMs = Math.floor(ts / bucketMs) * bucketMs;
+					buckets.set(bucketStartMs, (buckets.get(bucketStartMs) ?? 0) + 1);
+				}
+				for (const [bucketStartMs, count] of [...buckets.entries()].sort((a, b) => a[0] - b[0])) {
+					trend.push({
+						bucketStart: new Date(bucketStartMs).toISOString(),
+						count,
+					});
+				}
+			}
 			return {
 				totalFailures: records.length,
 				byErrorCode,
@@ -388,6 +427,7 @@ export function createSystemErrorsService(
 				topReasons,
 				byService,
 				recent,
+				trend,
 			};
 		},
 	};

@@ -338,6 +338,104 @@ describe("SystemService", () => {
 		vi.useRealTimers();
 	});
 
+	it("supports servicePrefix/errorCode filters, trend buckets and recent pagination", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const kernel = new LLMOSKernel();
+		kernel.registerService({
+			name: "err.alpha.one",
+			requiredPermissions: [],
+			execute: async () => {
+				throw new OSError("E_VALIDATION_FAILED", "alpha-one");
+			},
+		});
+		kernel.registerService({
+			name: "err.alpha.two",
+			requiredPermissions: [],
+			execute: async () => {
+				throw new OSError("E_VALIDATION_FAILED", "alpha-two");
+			},
+		});
+		kernel.registerService({
+			name: "err.beta",
+			requiredPermissions: [],
+			execute: async () => {
+				throw new Error("beta-boom");
+			},
+		});
+		await expect(
+			kernel.execute("err.alpha.one", {}, {
+				appId: "app.demo",
+				sessionId: "s8-filter",
+				permissions: [],
+				workingDirectory: process.cwd(),
+			}),
+		).rejects.toThrow();
+		vi.setSystemTime(new Date("2026-01-01T00:03:00.000Z"));
+		await expect(
+			kernel.execute("err.alpha.two", {}, {
+				appId: "app.demo",
+				sessionId: "s8-filter",
+				permissions: [],
+				workingDirectory: process.cwd(),
+			}),
+		).rejects.toThrow();
+		vi.setSystemTime(new Date("2026-01-01T00:04:00.000Z"));
+		await expect(
+			kernel.execute("err.beta", {}, {
+				appId: "app.demo",
+				sessionId: "s8-filter",
+				permissions: [],
+				workingDirectory: process.cwd(),
+			}),
+		).rejects.toThrow();
+
+		const service = createSystemErrorsService(kernel);
+		const response = await service.execute(
+			{
+				servicePrefix: "err.alpha",
+				errorCode: "E_VALIDATION_FAILED",
+				bucketMinutes: 5,
+				order: "asc",
+				offset: 0,
+				recentLimit: 1,
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s8-filter",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.totalFailures).toBe(2);
+		expect(response.byService["err.alpha.one"]?.total).toBe(1);
+		expect(response.byService["err.alpha.two"]?.total).toBe(1);
+		expect(response.byService["err.beta"]).toBeUndefined();
+		expect(response.trend).toHaveLength(1);
+		expect(response.trend[0]?.count).toBe(2);
+		expect(response.recent).toHaveLength(1);
+		expect(response.recent[0]?.service).toBe("err.alpha.one");
+
+		const paged = await service.execute(
+			{
+				servicePrefix: "err.alpha",
+				errorCode: "E_VALIDATION_FAILED",
+				order: "desc",
+				offset: 1,
+				recentLimit: 1,
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s8-filter",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(paged.recent).toHaveLength(1);
+		expect(paged.recent[0]?.service).toBe("err.alpha.one");
+		vi.useRealTimers();
+	});
+
 	it("evaluates policy decisions", async () => {
 		const kernel = new LLMOSKernel();
 		const service = createSystemPolicyEvaluateService(kernel);
