@@ -8,6 +8,7 @@ import { NotificationService } from "../notification-service/index.js";
 import { PolicyEngine } from "../kernel/policy-engine.js";
 import { SchedulerService } from "../scheduler-service/index.js";
 import { SecurityService } from "../security-service/index.js";
+import { AppManager } from "../app-manager/index.js";
 import { TenantQuotaGovernor } from "../kernel/resource-governor.js";
 import { OSError } from "../kernel/errors.js";
 import { vi } from "vitest";
@@ -15,6 +16,8 @@ import {
 	createSystemAuditService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
+	createSystemAppInstallReportService,
+	createSystemAppDeltaService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
 	createSystemErrorsKeysRotateService,
@@ -196,6 +199,52 @@ describe("SystemService", () => {
 			},
 		);
 		expect(response.capabilities).toEqual(["file:read", "store:write"]);
+	});
+
+	it("returns app install report and app delta", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:read", "store:read"],
+		});
+		const installReport = createSystemAppInstallReportService(manager);
+		const delta = createSystemAppDeltaService(manager);
+		const report = await installReport.execute(
+			{ appId: "todo" },
+			{
+				appId: "app.demo",
+				sessionId: "s6-install-report",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(report.appId).toBe("todo");
+		expect(report.addedPages).toContain("todo://list");
+		const deltaAll = await delta.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-install-report",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(deltaAll.apps).toHaveLength(1);
+		expect(deltaAll.apps[0]?.pages).toContain("todo://list");
 	});
 
 	it("returns all capabilities map", async () => {

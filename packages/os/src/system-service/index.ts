@@ -6,6 +6,7 @@ import type { OSService } from "../types/os.js";
 import type { PolicyInput } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 import type { TenantQuotaGovernor } from "../kernel/resource-governor.js";
+import type { AppManager } from "../app-manager/index.js";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { OSError } from "../kernel/errors.js";
@@ -36,6 +37,72 @@ export function createSystemHealthService(kernel: LLMOSKernel): OSService<Record
 
 export interface SystemDependenciesResponse {
 	graph: Record<string, string[]>;
+}
+
+export interface SystemAppInstallReportRequest {
+	appId: string;
+}
+
+export interface SystemAppInstallReportResponse {
+	appId: string;
+	version: string;
+	addedPages: string[];
+	addedPolicies: string[];
+	addedObservability: string[];
+}
+
+export function createSystemAppInstallReportService(
+	appManager: AppManager,
+): OSService<SystemAppInstallReportRequest, SystemAppInstallReportResponse> {
+	return {
+		name: "system.app.install.report",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const manifest = appManager.registry.get(req.appId);
+			return {
+				appId: manifest.id,
+				version: manifest.version,
+				addedPages: manifest.entry.pages.map((page) => page.route),
+				addedPolicies: [...manifest.permissions],
+				addedObservability: [`audit:${manifest.id}`, `metrics:${manifest.id}`, `events:${manifest.id}`],
+			};
+		},
+	};
+}
+
+export interface SystemAppDeltaRequest {
+	appId?: string;
+}
+
+export interface SystemAppDeltaResponse {
+	apps: Array<{
+		appId: string;
+		version: string;
+		pages: string[];
+		policies: string[];
+		observability: string[];
+	}>;
+}
+
+export function createSystemAppDeltaService(
+	appManager: AppManager,
+): OSService<SystemAppDeltaRequest, SystemAppDeltaResponse> {
+	return {
+		name: "system.app.delta",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const list = req.appId ? [appManager.registry.get(req.appId)] : appManager.registry.list();
+			return {
+				apps: list.map((manifest) => ({
+					appId: manifest.id,
+					version: manifest.version,
+					pages: manifest.entry.pages.map((item) => item.route),
+					policies: [...manifest.permissions],
+					observability: [`audit:${manifest.id}`, `metrics:${manifest.id}`, `events:${manifest.id}`],
+				})),
+			};
+		},
+	};
 }
 
 export function createSystemDependenciesService(

@@ -2,8 +2,12 @@ import {
 	AppManager,
 	createAppDisableService,
 	createAppEnableService,
+	createAppInstallV1Service,
 	createAppInstallService,
 	createAppListService,
+	createAppPageRenderService,
+	createRuntimeRiskConfirmService,
+	createRuntimeToolsValidateService,
 	createAppSetStateService,
 	createAppUninstallService,
 	createAppUpgradeService,
@@ -67,6 +71,12 @@ import {
 	createShellExecuteService,
 } from "./shell-service/index.js";
 import { StoreService, createStoreGetService, createStoreSetService, type StoreValue } from "./store-service/index.js";
+import { createTaskDecomposeService, createTaskLoopService, createTaskSubmitService } from "./task-runtime/index.js";
+import {
+	createPlannerComposeToolsService,
+	createPlannerSelectAppsService,
+	createRunnerExecutePlanService,
+} from "./planner/index.js";
 import {
 	createSystemAuditService,
 	createSystemAlertsService,
@@ -96,6 +106,8 @@ import {
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
+	createSystemAppInstallReportService,
+	createSystemAppDeltaService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
 	createSystemErrorsKeysRotateService,
@@ -232,6 +244,20 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		security: securityService,
 	});
 	const hostAdapters = new HostAdapterRegistry();
+	const appPageRenderer = {
+		render: async ({
+			page,
+			appId,
+		}: {
+			appId: string;
+			page: { name: string; description: string; route: string; path: string };
+			context: { appId: string; sessionId: string; permissions: string[]; workingDirectory: string };
+		}) => ({
+			prompt: `App ${appId} page ${page.name}: ${page.description}`,
+			tools: [],
+			metadata: { route: page.route, path: page.path },
+		}),
+	};
 
 	modelService.register({
 		name: "echo",
@@ -258,8 +284,20 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 			},
 		}),
 	);
+	registerWhenEnabled("app.install.v1", () => createAppInstallV1Service(appManager, securityService));
 	registerWhenEnabled("app.state.set", () => createAppSetStateService(appManager));
 	registerWhenEnabled("app.list", () => createAppListService(appManager));
+	registerWhenEnabled("app.page.render", () =>
+		createAppPageRenderService(appManager, appPageRenderer),
+	);
+	registerWhenEnabled("runtime.tools.validate", () => createRuntimeToolsValidateService(appManager));
+	registerWhenEnabled("runtime.risk.confirm", () => createRuntimeRiskConfirmService());
+	registerWhenEnabled("task.submit", () => createTaskSubmitService(appManager, appPageRenderer, modelService));
+	registerWhenEnabled("task.decompose", () => createTaskDecomposeService());
+	registerWhenEnabled("task.loop", () => createTaskLoopService(appManager, appPageRenderer, modelService));
+	registerWhenEnabled("planner.selectApps", () => createPlannerSelectAppsService(appManager));
+	registerWhenEnabled("planner.composeTools", () => createPlannerComposeToolsService(appManager, appPageRenderer));
+	registerWhenEnabled("runner.executePlan", () => createRunnerExecutePlanService(appManager, appPageRenderer, modelService));
 	registerWhenEnabled("app.upgrade", () =>
 		createAppUpgradeService(appManager, {
 			onUpgrade: (manifest) => {
@@ -316,6 +354,8 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("host.execute", () => createHostAdapterExecuteService(hostAdapters));
 	registerWhenEnabled("system.health", () => createSystemHealthService(kernel));
 	registerWhenEnabled("system.dependencies", () => createSystemDependenciesService(kernel));
+	registerWhenEnabled("system.app.install.report", () => createSystemAppInstallReportService(appManager));
+	registerWhenEnabled("system.app.delta", () => createSystemAppDeltaService(appManager));
 	registerWhenEnabled("system.metrics", () => createSystemMetricsService(kernel));
 	registerWhenEnabled("system.audit", () => createSystemAuditService(kernel));
 	registerWhenEnabled("system.governance.state.export", () => createSystemGovernanceStateExportService());
@@ -423,6 +463,21 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		notificationService.send({
 			topic: "system.alert",
 			message: `scheduler task failed: ${event.payload.id} attempt=${event.payload.attempt} error=${event.payload.error}`,
+		});
+	});
+
+	kernel.events.subscribe<{
+		service: string;
+		appId: string;
+		traceId: string;
+	}>("kernel.service.executed", (event) => {
+		if (event.payload.service !== "app.install" && event.payload.service !== "app.install.v1") {
+			return;
+		}
+		notificationService.send({
+			topic: "system.app.install",
+			severity: "info",
+			message: `app installed by ${event.payload.appId} via ${event.payload.service} trace=${event.payload.traceId}`,
 		});
 	});
 

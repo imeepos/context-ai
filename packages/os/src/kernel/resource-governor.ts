@@ -43,6 +43,7 @@ export class AppAuthorizationGovernor implements ResourceGovernor {
 		private readonly isAppEnabled: (appId: string) => boolean = () => true,
 		private readonly bypassServices: Set<string> = new Set([
 			"app.install",
+			"app.install.v1",
 			"app.list",
 			"app.state.set",
 			"app.uninstall",

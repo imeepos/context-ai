@@ -51,6 +51,51 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
+			const manifestV1Payload = JSON.stringify({
+				id: "app.v1",
+				name: "V1",
+				version: "1.0.0",
+				pages: [
+					{
+						id: "main",
+						route: "app.v1://main",
+						name: "Main",
+						description: "Main page",
+						path: "index.js",
+						tags: [],
+						default: true,
+					},
+				],
+				permissions: ["app:manage", "app:read"].sort(),
+			});
+			const signature = os.securityService.sign(manifestV1Payload, "v1-secret");
+			await os.kernel.execute(
+				"app.install.v1",
+				{
+					manifest: {
+						id: "app.v1",
+						name: "V1",
+						version: "1.0.0",
+						entry: {
+							pages: [
+								{
+									id: "main",
+									route: "app.v1://main",
+									name: "Main",
+									description: "Main page",
+									path: "index.js",
+									default: true,
+								},
+							],
+						},
+						permissions: ["app:manage", "app:read"],
+						signing: { keyId: "v1", signature },
+					},
+					requireSignature: true,
+					signingSecret: "v1-secret",
+				},
+				context,
+			);
 
 			await os.kernel.execute(
 				"app.install",
@@ -66,7 +111,9 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			const apps = await os.kernel.execute("app.list", { _: "list" }, context);
-			expect(apps.apps).toHaveLength(2);
+			expect(apps.apps).toHaveLength(3);
+			const installEvents = await os.kernel.execute("notification.list", { topic: "system.app.install", limit: 10 }, context);
+			expect(installEvents.notifications.length).toBeGreaterThan(0);
 
 			await os.kernel.execute("store.set", { key: "name", value: "ctp" }, context);
 			const result = await os.kernel.execute("store.get", { key: "name" }, context);
@@ -74,6 +121,62 @@ describe("createDefaultLLMOS", () => {
 
 			const model = await os.kernel.execute("model.generate", { model: "echo", prompt: "hi" }, context);
 			expect(model.output).toBe("echo:hi");
+			const task = await os.kernel.execute(
+				"task.submit",
+				{ text: "summarize todo status", route: "app.default://main", maxSteps: 1, stopCondition: "echo" },
+				context,
+			);
+			expect(typeof task.result).toBe("string");
+			expect(task.usedRoute).toBe("app.default://main");
+			const decomposed = await os.kernel.execute(
+				"task.decompose",
+				{ text: "collect data, analyze, then summarize", maxParts: 5 },
+				context,
+			);
+			expect(decomposed.tasks.length).toBeGreaterThan(1);
+			const looped = await os.kernel.execute(
+				"task.loop",
+				{
+					route: "app.default://main",
+					taskGoal: "loop once",
+					maxSteps: 1,
+				},
+				context,
+			);
+			expect(looped.steps).toBeGreaterThan(0);
+			const riskConfirm = await os.kernel.execute(
+				"runtime.risk.confirm",
+				{
+					riskLevel: "high",
+					approved: true,
+					approver: "ops",
+					approvalExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+				},
+				context,
+			);
+			expect(riskConfirm.allowed).toBe(true);
+			const selectedApps = await os.kernel.execute(
+				"planner.selectApps",
+				{ text: "use default app to summarize", limit: 1 },
+				context,
+			);
+			expect(selectedApps.selected.length).toBeGreaterThan(0);
+			const composedTools = await os.kernel.execute(
+				"planner.composeTools",
+				{ routes: ["app.default://main"] },
+				context,
+			);
+			expect(composedTools.composed.length).toBe(1);
+			const runPlan = await os.kernel.execute(
+				"runner.executePlan",
+				{
+					text: "run default route once",
+					routes: ["app.default://main"],
+					maxSteps: 1,
+				},
+				context,
+			);
+			expect(runPlan.steps).toBeGreaterThan(0);
 
 			await os.kernel.execute(
 				"package.install",
@@ -817,6 +920,61 @@ describe("createDefaultLLMOS", () => {
 			os.notificationService.send({ topic: "system.alert", message: "x2" });
 			os.notificationService.send({ topic: "system.alert", message: "x3" });
 			expect(os.notificationService.query({ topic: "system.alert" })).toHaveLength(2);
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("runs text task orchestration e2e (render + planner + runner)", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-e2e-"));
+		try {
+			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
+			const context = {
+				appId: "todo",
+				sessionId: "s-e2e",
+				permissions: ["app:manage", "app:read", "model:invoke", "system:read"],
+				workingDirectory: root,
+			};
+			await os.kernel.execute(
+				"app.install.v1",
+				{
+					manifest: {
+						id: "todo",
+						name: "Todo",
+						version: "1.0.0",
+						entry: {
+							pages: [
+								{
+									id: "list",
+									route: "todo://list",
+									name: "List",
+									description: "Todo list page",
+									path: "index.js",
+									default: true,
+								},
+							],
+						},
+						permissions: ["app:manage", "app:read", "model:invoke", "system:read"],
+					},
+				},
+				context,
+			);
+			const rendered = await os.kernel.execute("app.page.render", { route: "todo://list" }, context);
+			expect(typeof rendered.prompt).toBe("string");
+			const selected = await os.kernel.execute(
+				"planner.selectApps",
+				{ text: "show todo list", limit: 1 },
+				context,
+			);
+			expect(selected.selected[0]?.appId).toBe("todo");
+			const composed = await os.kernel.execute("planner.composeTools", { routes: ["todo://list"] }, context);
+			expect(composed.composed.length).toBe(1);
+			const executed = await os.kernel.execute(
+				"runner.executePlan",
+				{ text: "summarize todos", routes: ["todo://list"], maxSteps: 1 },
+				context,
+			);
+			expect(executed.steps).toBe(1);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
