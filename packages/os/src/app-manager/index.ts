@@ -17,12 +17,20 @@ export class AppManager {
 	readonly quota = new AppQuotaManager();
 	readonly routes = new AppRouteRegistry();
 	private readonly disabledApps = new Set<string>();
-	private readonly installReports = new Map<string, AppInstallDeltaReport>();
+	private readonly installReports = new Map<string, AppInstallReportState>();
 	private readonly rollbackSnapshots = new Map<
 		string,
-		{ appId: string; previous?: AppManifestV1; previousQuota?: AppQuota }
+		{
+			appId: string;
+			previous?: AppManifestV1;
+			previousQuota?: AppQuota;
+			createdAt: string;
+			expiresAt: string;
+		}
 	>();
 	private static readonly MAX_ROLLBACK_SNAPSHOTS_PER_APP = 20;
+	private static readonly DEFAULT_ROLLBACK_TTL_MS = 24 * 60 * 60 * 1000;
+	private rollbackTokenTtlMs = AppManager.DEFAULT_ROLLBACK_TTL_MS;
 
 	install(manifest: AppManifest, quota?: AppQuota): void {
 		const normalized = normalizeManifest(manifest);
@@ -82,22 +90,48 @@ export class AppManager {
 		return this.registry.has(appId) && !this.disabledApps.has(appId);
 	}
 
-	setInstallReport(report: AppInstallDeltaReport): void {
-		this.installReports.set(report.appId, report);
+	setInstallReport(report: AppInstallDeltaReport, lastAction: "install" | "rollback" = "install"): void {
+		this.installReports.set(report.appId, {
+			report,
+			lastAction,
+			updatedAt: new Date().toISOString(),
+		});
 	}
 
 	getInstallReport(appId: string): AppInstallDeltaReport | undefined {
-		return this.installReports.get(appId);
+		return this.installReports.get(appId)?.report;
+	}
+
+	getInstallReportState(appId: string): AppInstallReportState | undefined {
+		const state = this.installReports.get(appId);
+		if (!state) return undefined;
+		return {
+			report: {
+				...state.report,
+			},
+			lastAction: state.lastAction,
+			updatedAt: state.updatedAt,
+		};
 	}
 
 	setRollbackSnapshot(
 		rollbackToken: string,
-		snapshot: { appId: string; previous?: AppManifestV1; previousQuota?: AppQuota },
+		snapshot: {
+			appId: string;
+			previous?: AppManifestV1;
+			previousQuota?: AppQuota;
+			createdAt?: string;
+			expiresAt?: string;
+		},
 	): void {
+		const createdAt = snapshot.createdAt ?? new Date().toISOString();
+		const expiresAt = snapshot.expiresAt ?? new Date(Date.now() + this.rollbackTokenTtlMs).toISOString();
 		this.rollbackSnapshots.set(rollbackToken, {
 			appId: snapshot.appId,
 			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
 			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
+			createdAt,
+			expiresAt,
 		});
 		this.pruneRollbackSnapshots(snapshot.appId);
 	}
@@ -108,6 +142,11 @@ export class AppManager {
 	): { appId: string; previous?: AppManifestV1; previousQuota?: AppQuota } | undefined {
 		const snapshot = this.rollbackSnapshots.get(rollbackToken);
 		if (!snapshot) return undefined;
+		const expiresAt = Date.parse(snapshot.expiresAt);
+		if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
+			this.rollbackSnapshots.delete(rollbackToken);
+			return undefined;
+		}
 		if (options?.appId && snapshot.appId !== options.appId) {
 			return undefined;
 		}
@@ -117,6 +156,72 @@ export class AppManager {
 			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
 			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
 		};
+	}
+
+	setRollbackTokenTTL(ms: number): void {
+		if (!Number.isFinite(ms) || ms <= 0) {
+			throw new OSError("E_VALIDATION_FAILED", `Invalid rollback token TTL: ${ms}`);
+		}
+		this.rollbackTokenTtlMs = Math.floor(ms);
+	}
+
+	exportRollbackState(): {
+		snapshots: Array<{
+			token: string;
+			appId: string;
+			previous?: AppManifestV1;
+			previousQuota?: AppQuota;
+			createdAt: string;
+			expiresAt: string;
+		}>;
+		installReports: AppInstallReportState[];
+	} {
+		return {
+			snapshots: [...this.rollbackSnapshots.entries()].map(([token, snapshot]) => ({
+				token,
+				appId: snapshot.appId,
+				previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
+				previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
+				createdAt: snapshot.createdAt,
+				expiresAt: snapshot.expiresAt,
+			})),
+			installReports: [...this.installReports.values()].map((state) => ({
+				report: { ...state.report },
+				lastAction: state.lastAction,
+				updatedAt: state.updatedAt,
+			})),
+		};
+	}
+
+	importRollbackState(input: {
+		snapshots: Array<{
+			token: string;
+			appId: string;
+			previous?: AppManifestV1;
+			previousQuota?: AppQuota;
+			createdAt: string;
+			expiresAt: string;
+		}>;
+		installReports: AppInstallReportState[];
+	}): void {
+		this.rollbackSnapshots.clear();
+		this.installReports.clear();
+		for (const snapshot of input.snapshots ?? []) {
+			this.setRollbackSnapshot(snapshot.token, {
+				appId: snapshot.appId,
+				previous: snapshot.previous,
+				previousQuota: snapshot.previousQuota,
+				createdAt: snapshot.createdAt,
+				expiresAt: snapshot.expiresAt,
+			});
+		}
+		for (const state of input.installReports ?? []) {
+			this.installReports.set(state.report.appId, {
+				report: { ...state.report },
+				lastAction: state.lastAction,
+				updatedAt: state.updatedAt,
+			});
+		}
 	}
 
 	private pruneRollbackSnapshots(appId: string): void {
@@ -144,6 +249,12 @@ export interface AppInstallDeltaReport {
 	addedPolicies: string[];
 	addedObservability: string[];
 	rollbackToken: string;
+}
+
+export interface AppInstallReportState {
+	report: AppInstallDeltaReport;
+	lastAction: "install" | "rollback";
+	updatedAt: string;
 }
 
 export interface AppInstallRollbackRequest {
@@ -272,7 +383,7 @@ export function createAppInstallRollbackService(
 						`events:${snapshot.previous.id}`,
 					],
 					rollbackToken: req.rollbackToken,
-				});
+				}, "rollback");
 				hooks?.onInstall?.(snapshot.previous);
 				return {
 					ok: true,

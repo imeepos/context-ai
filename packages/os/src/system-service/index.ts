@@ -112,6 +112,8 @@ export interface SystemAppInstallReportResponse {
 	addedPolicies: string[];
 	addedObservability: string[];
 	rollbackToken: string;
+	lastAction: "install" | "rollback";
+	updatedAt: string;
 }
 
 export function createSystemAppInstallReportService(
@@ -122,7 +124,8 @@ export function createSystemAppInstallReportService(
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const manifest = appManager.registry.get(req.appId);
-			const report = appManager.getInstallReport(req.appId);
+			const state = appManager.getInstallReportState(req.appId);
+			const report = state?.report;
 			return {
 				appId: manifest.id,
 				version: report?.version ?? manifest.version,
@@ -130,6 +133,8 @@ export function createSystemAppInstallReportService(
 				addedPolicies: report?.addedPolicies ?? [...manifest.permissions],
 				addedObservability: report?.addedObservability ?? [`audit:${manifest.id}`, `metrics:${manifest.id}`, `events:${manifest.id}`],
 				rollbackToken: report?.rollbackToken ?? `${manifest.id}@${manifest.version}:unknown`,
+				lastAction: state?.lastAction ?? "install",
+				updatedAt: state?.updatedAt ?? new Date().toISOString(),
 			};
 		},
 	};
@@ -146,6 +151,21 @@ export interface SystemAppDeltaResponse {
 		pages: string[];
 		policies: string[];
 		observability: string[];
+	}>;
+}
+
+export interface SystemAppRollbackState {
+	snapshots: Array<{
+		token: string;
+		appId: string;
+		createdAt: string;
+		expiresAt: string;
+	}>;
+	installReports: Array<{
+		appId: string;
+		version: string;
+		lastAction: "install" | "rollback";
+		updatedAt: string;
 	}>;
 }
 
@@ -166,6 +186,84 @@ export function createSystemAppDeltaService(
 					observability: [`audit:${manifest.id}`, `metrics:${manifest.id}`, `events:${manifest.id}`],
 				})),
 			};
+		},
+	};
+}
+
+export function createSystemAppRollbackStateExportService(
+	appManager: AppManager,
+): OSService<Record<string, never>, { state: SystemAppRollbackState }> {
+	return {
+		name: "system.app.rollback.state.export",
+		requiredPermissions: ["system:read"],
+		execute: async () => {
+			const state = appManager.exportRollbackState();
+			return {
+				state: {
+					snapshots: state.snapshots.map((snapshot) => ({
+						token: snapshot.token,
+						appId: snapshot.appId,
+						createdAt: snapshot.createdAt,
+						expiresAt: snapshot.expiresAt,
+					})),
+					installReports: state.installReports.map((item) => ({
+						appId: item.report.appId,
+						version: item.report.version,
+						lastAction: item.lastAction,
+						updatedAt: item.updatedAt,
+					})),
+				},
+			};
+		},
+	};
+}
+
+export function createSystemAppRollbackStateImportService(
+	appManager: AppManager,
+): OSService<
+	{ state: ReturnType<AppManager["exportRollbackState"]> },
+	{ imported: true }
+> {
+	return {
+		name: "system.app.rollback.state.import",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			appManager.importRollbackState(req.state);
+			return { imported: true };
+		},
+	};
+}
+
+export function createSystemAppRollbackStatePersistService(
+	appManager: AppManager,
+	store: { set(key: string, value: unknown): void },
+	key = "system.app.rollback.state",
+): OSService<Record<string, never>, { persisted: true }> {
+	return {
+		name: "system.app.rollback.state.persist",
+		requiredPermissions: ["system:write"],
+		execute: async () => {
+			store.set(key, appManager.exportRollbackState() as unknown as Record<string, unknown>);
+			return { persisted: true };
+		},
+	};
+}
+
+export function createSystemAppRollbackStateRecoverService(
+	appManager: AppManager,
+	store: { get(key: string): unknown },
+	key = "system.app.rollback.state",
+): OSService<Record<string, never>, { recovered: boolean }> {
+	return {
+		name: "system.app.rollback.state.recover",
+		requiredPermissions: ["system:write"],
+		execute: async () => {
+			const raw = store.get(key);
+			if (!raw || typeof raw !== "object") {
+				return { recovered: false };
+			}
+			appManager.importRollbackState(raw as ReturnType<AppManager["exportRollbackState"]>);
+			return { recovered: true };
 		},
 	};
 }

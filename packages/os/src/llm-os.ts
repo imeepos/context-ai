@@ -113,6 +113,10 @@ import {
 	createSystemRoutesStatsService,
 	createSystemAppInstallReportService,
 	createSystemAppDeltaService,
+	createSystemAppRollbackStateExportService,
+	createSystemAppRollbackStateImportService,
+	createSystemAppRollbackStatePersistService,
+	createSystemAppRollbackStateRecoverService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
 	createSystemErrorsKeysRotateService,
@@ -381,6 +385,14 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.routes.stats", () => createSystemRoutesStatsService(appManager));
 	registerWhenEnabled("system.app.install.report", () => createSystemAppInstallReportService(appManager));
 	registerWhenEnabled("system.app.delta", () => createSystemAppDeltaService(appManager));
+	registerWhenEnabled("system.app.rollback.state.export", () => createSystemAppRollbackStateExportService(appManager));
+	registerWhenEnabled("system.app.rollback.state.import", () => createSystemAppRollbackStateImportService(appManager));
+	registerWhenEnabled("system.app.rollback.state.persist", () =>
+		createSystemAppRollbackStatePersistService(appManager, storeService),
+	);
+	registerWhenEnabled("system.app.rollback.state.recover", () =>
+		createSystemAppRollbackStateRecoverService(appManager, storeService),
+	);
 	registerWhenEnabled("system.metrics", () => createSystemMetricsService(kernel));
 	registerWhenEnabled("system.audit", () => createSystemAuditService(kernel));
 	registerWhenEnabled("system.governance.state.export", () => createSystemGovernanceStateExportService());

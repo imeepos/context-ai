@@ -558,6 +558,7 @@ describe("AppManager", () => {
 		expect(forced.report.appId).toBe("todo");
 		expect(Array.isArray(forced.report.addedObservability)).toBe(true);
 		expect(manager.getInstallReport("todo")?.rollbackToken).toBe(forced.report.rollbackToken);
+		expect(manager.getInstallReportState("todo")?.lastAction).toBe("install");
 	});
 
 	it("rolls back install by rollback token", async () => {
@@ -634,6 +635,7 @@ describe("AppManager", () => {
 		expect(reverted.restoredVersion).toBe("1.0.0");
 		expect(manager.routes.resolve("todo://list").page.id).toBe("list");
 		expect(manager.getInstallReport("todo")?.version).toBe("1.0.0");
+		expect(manager.getInstallReportState("todo")?.lastAction).toBe("rollback");
 		expect(() => manager.routes.resolve("todo://board")).toThrowError(
 			expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>),
 		);
@@ -897,6 +899,122 @@ describe("AppManager", () => {
 			previous: undefined,
 			previousQuota: undefined,
 		});
+	});
+
+	it("expires rollback token by ttl", async () => {
+		const manager = new AppManager();
+		const install = createAppInstallService(manager);
+		const rollback = createAppInstallRollbackService(manager);
+		manager.setRollbackTokenTTL(1);
+		await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.0.0",
+					entry: {
+						pages: [
+							{
+								id: "list",
+								route: "todo://list",
+								name: "List",
+								description: "Show todo list",
+								path: "src/todo/list.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:manage", "app:read"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-ttl",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const upgraded = await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.1.0",
+					entry: {
+						pages: [
+							{
+								id: "board",
+								route: "todo://board",
+								name: "Board",
+								description: "Show todo board",
+								path: "src/todo/board.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:manage", "app:read"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-ttl",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+		await expect(
+			rollback.execute(
+				{
+					appId: "todo",
+					rollbackToken: upgraded.report.rollbackToken,
+				},
+				{
+					appId: "todo",
+					sessionId: "s-install-rollback-ttl",
+					permissions: ["app:manage"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+	});
+
+	it("exports and imports rollback state", async () => {
+		const manager = new AppManager();
+		const install = createAppInstallService(manager);
+		await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.0.0",
+					entry: {
+						pages: [
+							{
+								id: "list",
+								route: "todo://list",
+								name: "List",
+								description: "Show todo list",
+								path: "src/todo/list.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:manage", "app:read"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-export-import",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const state = manager.exportRollbackState();
+		const next = new AppManager();
+		next.importRollbackState(state);
+		expect(next.getInstallReport("todo")?.version).toBe("1.0.0");
+		expect(next.exportRollbackState().snapshots.length).toBeGreaterThan(0);
 	});
 
 	it("supports v1 install with signature verification", async () => {

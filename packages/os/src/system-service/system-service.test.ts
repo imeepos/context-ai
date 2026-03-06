@@ -18,6 +18,10 @@ import {
 	createSystemCapabilitiesListService,
 	createSystemAppInstallReportService,
 	createSystemAppDeltaService,
+	createSystemAppRollbackStateExportService,
+	createSystemAppRollbackStateImportService,
+	createSystemAppRollbackStatePersistService,
+	createSystemAppRollbackStateRecoverService,
 	createSystemRoutesService,
 	createSystemRoutesStatsService,
 	createSystemErrorsService,
@@ -237,6 +241,8 @@ describe("SystemService", () => {
 		expect(report.appId).toBe("todo");
 		expect(report.addedPages).toContain("todo://list");
 		expect(typeof report.rollbackToken).toBe("string");
+		expect(report.lastAction).toBe("install");
+		expect(typeof report.updatedAt).toBe("string");
 		const deltaAll = await delta.execute(
 			{},
 			{
@@ -345,6 +351,94 @@ describe("SystemService", () => {
 		);
 		expect(report.version).toBe("1.0.0");
 		expect(report.addedPages).toEqual(["todo://list"]);
+		expect(report.lastAction).toBe("rollback");
+	});
+
+	it("exports/imports and persists rollback state", async () => {
+		const manager = new AppManager();
+		const install = createAppInstallService(manager);
+		await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.0.0",
+					entry: {
+						pages: [
+							{
+								id: "list",
+								route: "todo://list",
+								name: "List",
+								description: "Show todo list",
+								path: "src/todo/list.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:read"],
+				},
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-state",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const exportService = createSystemAppRollbackStateExportService(manager);
+		const state = await exportService.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-state",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(state.state.installReports[0]?.appId).toBe("todo");
+		const importedManager = new AppManager();
+		const importService = createSystemAppRollbackStateImportService(importedManager);
+		await importService.execute(
+			{ state: manager.exportRollbackState() },
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-state",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(importedManager.getInstallReport("todo")?.version).toBe("1.0.0");
+
+		let persisted: unknown;
+		const persistService = createSystemAppRollbackStatePersistService(manager, {
+			set: (_key, value) => {
+				persisted = value;
+			},
+		});
+		await persistService.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-state",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const recoverManager = new AppManager();
+		const recoverService = createSystemAppRollbackStateRecoverService(recoverManager, {
+			get: () => persisted,
+		});
+		const recovered = await recoverService.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-state",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(recovered.recovered).toBe(true);
+		expect(recoverManager.getInstallReport("todo")?.version).toBe("1.0.0");
 	});
 
 	it("returns route registry snapshot", async () => {
