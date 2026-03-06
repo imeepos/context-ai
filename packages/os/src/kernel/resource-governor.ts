@@ -24,9 +24,22 @@ export class CompositeResourceGovernor implements ResourceGovernor {
 export class AppQuotaGovernor implements ResourceGovernor {
 	constructor(
 		private readonly consume: (appId: string, delta: { toolCalls: number; tokens: number }) => void,
+		private readonly bypassServices: Set<string> = new Set([
+			"app.install",
+			"app.install.v1",
+			"app.install.rollback",
+			"app.uninstall",
+			"app.upgrade",
+			"app.state.set",
+			"app.disable",
+			"app.enable",
+		]),
 	) {}
 
 	beforeExecute(input: ExecuteBudgetInput): void {
+		if (this.bypassServices.has(input.serviceName)) {
+			return;
+		}
 		const approxTokens = Math.max(1, Math.ceil(JSON.stringify(input.request).length / 4));
 		try {
 			this.consume(input.context.appId, { toolCalls: 1, tokens: approxTokens });
