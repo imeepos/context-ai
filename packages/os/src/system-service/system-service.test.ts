@@ -25,6 +25,7 @@ import {
 	createSystemAlertsSLOService,
 	createSystemAlertsIncidentsService,
 	createSystemAlertsDigestService,
+	createSystemAlertsReportService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -640,5 +641,39 @@ describe("SystemService", () => {
 		expect(response.total).toBe(2);
 		expect(response.digest).toContain("critical");
 		expect(response.digest).toContain("db down");
+	});
+
+	it("returns unified alert report", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			dedupeWindowMs: 1000,
+			rateLimit: { limit: 10, windowMs: 60000 },
+		});
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "disk high", severity: "warning" });
+		const first = notification.query({ topic: "system.alert", limit: 1 })[0];
+		if (first) {
+			vi.setSystemTime(new Date("2026-01-01T00:00:05.000Z"));
+			notification.ack({ id: first.id });
+		}
+
+		const service = createSystemAlertsReportService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", windowMinutes: 60 },
+			{
+				appId: "app.demo",
+				sessionId: "s23",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.policy.dedupeWindowMs).toBe(1000);
+		expect(typeof response.stats.sent).toBe("number");
+		expect(typeof response.trends.total).toBe("number");
+		expect(typeof response.slo.avgAckLatencyMs).toBe("number");
+		expect(typeof response.digest).toBe("string");
+		vi.useRealTimers();
 	});
 });

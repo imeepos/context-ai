@@ -213,6 +213,8 @@ describe("createDefaultLLMOS", () => {
 			expect(typeof incidents.totalIncidents).toBe("number");
 			const digest = await os.kernel.execute("system.alerts.digest", { topic: "system.alert" }, context);
 			expect(typeof digest.digest).toBe("string");
+			const report = await os.kernel.execute("system.alerts.report", { topic: "system.alert" }, context);
+			expect(typeof report.digest).toBe("string");
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(
