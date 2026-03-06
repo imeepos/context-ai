@@ -998,6 +998,78 @@ describe("createDefaultLLMOS", () => {
 		}
 	});
 
+	it("supports rollback gc dry-run and stats window in default os flow", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-rollback-gc-"));
+		try {
+			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
+			const context = {
+				appId: "app.gc",
+				sessionId: "session-rollback-gc",
+				permissions: ["app:manage", "app:read", "system:read", "system:write"],
+				workingDirectory: root,
+			};
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "app.gc",
+						name: "GC",
+						version: "1.0.0",
+						entry: {
+							pages: [
+								{
+									id: "v1",
+									route: "app.gc://v1",
+									name: "V1",
+									description: "GC v1 page",
+									path: "v1.js",
+									default: true,
+								},
+							],
+						},
+						permissions: ["app:manage", "app:read", "system:read", "system:write"],
+					},
+				},
+				context,
+			);
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "app.gc",
+						name: "GC",
+						version: "1.1.0",
+						entry: {
+							pages: [
+								{
+									id: "v2",
+									route: "app.gc://v2",
+									name: "V2",
+									description: "GC v2 page",
+									path: "v2.js",
+									default: true,
+								},
+							],
+						},
+						permissions: ["app:manage", "app:read", "system:read", "system:write"],
+					},
+				},
+				context,
+			);
+			const dryRun = await os.kernel.execute("system.app.rollback.gc", { dryRun: true, limit: 1 }, context);
+			expect(dryRun.dryRun).toBe(true);
+			expect(dryRun.eligible).toBeGreaterThanOrEqual(0);
+			const stats = await os.kernel.execute(
+				"system.app.rollback.stats",
+				{ appId: "app.gc", soonToExpireWindowMs: 24 * 60 * 60 * 1000 },
+				context,
+			);
+			expect(typeof stats.soonToExpireSnapshots).toBe("number");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("caps net journal size by configured limit", async () => {
 		const root = await mkdtemp(join(tmpdir(), "os-kernel-net-journal-"));
 		try {

@@ -1017,6 +1017,23 @@ describe("AppManager", () => {
 		expect(next.exportRollbackState().snapshots.length).toBeGreaterThan(0);
 	});
 
+	it("rejects invalid rollback state on import", () => {
+		const manager = new AppManager();
+		expect(() =>
+			manager.importRollbackState({
+				snapshots: [
+					{
+						token: "",
+						appId: "todo",
+						createdAt: "bad-date",
+						expiresAt: "2020-01-01T00:00:00.000Z",
+					},
+				],
+				installReports: [],
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+	});
+
 	it("supports v1 install with signature verification", async () => {
 		const manager = new AppManager();
 		const security = new SecurityService();
