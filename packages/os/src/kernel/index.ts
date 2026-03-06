@@ -8,7 +8,7 @@ import { KernelMetrics } from "./metrics.js";
 import { PolicyEngine } from "./policy-engine.js";
 import type { ResourceGovernor } from "./resource-governor.js";
 import { ServiceRegistry } from "./service-registry.js";
-import type { OSContext, OSExecutionMeta, OSService } from "../types/os.js";
+import type { OSContext, OSExecutionMeta, OSService, Token } from "../types/os.js";
 
 export interface LLMOSKernelOptions {
 	policyEngine?: PolicyEngine;
@@ -44,6 +44,14 @@ export class LLMOSKernel {
 	private ensureTraceId(context: OSContext): string {
 		return context.traceId ?? randomUUID();
 	}
+
+	async execute<Request, Response, Name extends string>(
+		serviceName: Token<Request, Response, Name>,
+		request: Request,
+		context: OSContext,
+	): Promise<Response>;
+
+	async execute<Request, Response>(serviceName: string, request: Request, context: OSContext): Promise<Response>;
 
 	async execute<Request, Response>(serviceName: string, request: Request, context: OSContext): Promise<Response> {
 		const result = await this.executeWithMeta<Request, Response>(serviceName, request, context);

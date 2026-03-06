@@ -409,6 +409,45 @@ describe("AppManager", () => {
 		).rejects.toThrow("render boom");
 		const stats = manager.routes.stats("todo");
 		expect(stats[0]?.failure).toBeGreaterThan(0);
+		expect(manager.lifecycle.getState("todo")).toBe("installed");
+	});
+
+	it("uses resolved app id in render context for cross-app route rendering", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		const service = createAppPageRenderService(manager, {
+			render: async ({ context }) => ({
+				prompt: `ctx-app:${context.appId}`,
+				tools: [],
+			}),
+		});
+		const result = await service.execute(
+			{ route: "todo://list" },
+			{
+				appId: "caller-app",
+				sessionId: "s-render-cross-app",
+				permissions: ["app:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(result.prompt).toBe("ctx-app:todo");
 	});
 
 	it("recovers lifecycle from suspended to running on app.start", async () => {

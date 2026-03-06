@@ -1,6 +1,11 @@
-import type { AppManager, AppPageRenderer } from "../app-manager/index.js";
+import type { AppManager, AppPageRenderContext, AppPageRenderInput, AppPageRenderer } from "../app-manager/index.js";
 import type { ModelService } from "../model-service/index.js";
-import type { OSService } from "../types/os.js";
+import {
+	PLANNER_COMPOSE_TOOLS,
+	PLANNER_SELECT_APPS,
+	RUNNER_EXECUTE_PLAN,
+} from "../tokens.js";
+import type { OSService, Token } from "../types/os.js";
 
 export interface PlannerSelectAppsRequest {
 	text: string;
@@ -62,6 +67,27 @@ export interface RunnerExecutePlanResponse {
 	summary: string;
 }
 
+function createFallbackSystemRuntime(): AppPageRenderInput["system"] {
+	function execute<Request, Response, Name extends string>(
+		service: Token<Request, Response, Name>,
+		_request: Request,
+		_context?: AppPageRenderContext,
+	): Promise<Response>;
+	function execute<Request, Response>(
+		service: string,
+		_request: Request,
+		_context?: AppPageRenderContext,
+	): Promise<Response>;
+	function execute(service: string): Promise<never> {
+		throw new Error(`System runtime is unavailable in planner renderer context: ${service}`);
+	}
+
+	return {
+		execute,
+		services: [],
+	};
+}
+
 function scoreApp(text: string, app: ReturnType<AppManager["registry"]["list"]>[number]): { score: number; reason: string } {
 	const lowerText = text.toLowerCase();
 	let score = 0;
@@ -93,7 +119,7 @@ export function createPlannerSelectAppsService(
 	appManager: AppManager,
 ): OSService<PlannerSelectAppsRequest, PlannerSelectAppsResponse> {
 	return {
-		name: "planner.selectApps",
+		name: PLANNER_SELECT_APPS,
 		requiredPermissions: ["app:read"],
 		execute: async (req) => {
 			const limit = req.limit && req.limit > 0 ? req.limit : 3;
@@ -122,7 +148,7 @@ export function createPlannerComposeToolsService(
 	pageRenderer: AppPageRenderer,
 ): OSService<PlannerComposeToolsRequest, PlannerComposeToolsResponse> {
 	return {
-		name: "planner.composeTools",
+		name: PLANNER_COMPOSE_TOOLS,
 		requiredPermissions: ["app:read"],
 		execute: async (req, ctx) => {
 			const composed: PlannerComposeToolsResponse["composed"] = [];
@@ -138,6 +164,7 @@ export function createPlannerComposeToolsService(
 						permissions: ctx.permissions,
 						workingDirectory: ctx.workingDirectory,
 					},
+					system: createFallbackSystemRuntime(),
 				});
 				toolCount += rendered.tools.length;
 				composed.push({
@@ -158,7 +185,7 @@ export function createRunnerExecutePlanService(
 	modelService: ModelService,
 ): OSService<RunnerExecutePlanRequest, RunnerExecutePlanResponse> {
 	return {
-		name: "runner.executePlan",
+		name: RUNNER_EXECUTE_PLAN,
 		requiredPermissions: ["app:read", "model:invoke"],
 		execute: async (req, ctx) => {
 			if (req.risk && req.risk.level !== "low") {
@@ -199,6 +226,7 @@ export function createRunnerExecutePlanService(
 								permissions: ctx.permissions,
 								workingDirectory: ctx.workingDirectory,
 							},
+							system: createFallbackSystemRuntime(),
 						});
 						const prompt = `${rendered.prompt}\n\nTask Goal:\n${req.text}\nRoute:${route}\nTools:${rendered.tools
 							.map((tool) => tool.name)
@@ -229,6 +257,7 @@ export function createRunnerExecutePlanService(
 										permissions: ctx.permissions,
 										workingDirectory: ctx.workingDirectory,
 									},
+									system: createFallbackSystemRuntime(),
 								});
 								const fallbackPrompt = `${fallbackRendered.prompt}\n\nTask Goal:\n${req.text}\nRoute:${req.fallbackRoute}\nTools:${fallbackRendered.tools
 									.map((tool) => tool.name)

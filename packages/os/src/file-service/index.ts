@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { PolicyEngine } from "../kernel/policy-engine.js";
+import { FILE_EDIT, FILE_FIND, FILE_GREP, FILE_LIST, FILE_READ, FILE_WRITE } from "../tokens.js";
 import type { OSContext, OSService } from "../types/os.js";
 import { FileGuard } from "./guard.js";
 import { SnapshotStore } from "./snapshot.js";
@@ -125,7 +126,7 @@ export class FileService {
 
 export function createFileReadService(fileService: FileService): OSService<FileReadRequest, { content: string }> {
 	return {
-		name: "file.read",
+		name: FILE_READ,
 		requiredPermissions: ["file:read"],
 		execute: async (req, ctx) => {
 			const content = await fileService.read(req, ctx);
@@ -136,7 +137,7 @@ export function createFileReadService(fileService: FileService): OSService<FileR
 
 export function createFileWriteService(fileService: FileService): OSService<FileWriteRequest, { ok: true }> {
 	return {
-		name: "file.write",
+		name: FILE_WRITE,
 		requiredPermissions: ["file:write"],
 		execute: async (req, ctx) => {
 			await fileService.write(req, ctx);
@@ -147,7 +148,7 @@ export function createFileWriteService(fileService: FileService): OSService<File
 
 export function createFileListService(fileService: FileService): OSService<FileListRequest, { entries: string[] }> {
 	return {
-		name: "file.list",
+		name: FILE_LIST,
 		requiredPermissions: ["file:read"],
 		execute: async (req, ctx) => ({
 			entries: await fileService.list(req, ctx),
@@ -157,7 +158,7 @@ export function createFileListService(fileService: FileService): OSService<FileL
 
 export function createFileFindService(fileService: FileService): OSService<FileFindRequest, { paths: string[] }> {
 	return {
-		name: "file.find",
+		name: FILE_FIND,
 		requiredPermissions: ["file:read"],
 		execute: async (req, ctx) => ({
 			paths: await fileService.find(req, ctx),
@@ -169,7 +170,7 @@ export function createFileGrepService(
 	fileService: FileService,
 ): OSService<FileGrepRequest, { matches: Array<{ line: number; text: string }> }> {
 	return {
-		name: "file.grep",
+		name: FILE_GREP,
 		requiredPermissions: ["file:read"],
 		execute: async (req, ctx) => ({
 			matches: await fileService.grep(req, ctx),
@@ -179,7 +180,7 @@ export function createFileGrepService(
 
 export function createFileEditService(fileService: FileService): OSService<FileEditRequest, { changed: boolean }> {
 	return {
-		name: "file.edit",
+		name: FILE_EDIT,
 		requiredPermissions: ["file:write"],
 		execute: async (req, ctx) => fileService.edit(req, ctx),
 	};

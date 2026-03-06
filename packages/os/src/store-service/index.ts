@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { STORE_GET, STORE_SET } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
 type StoreValue = string | number | boolean | null | { [k: string]: StoreValue } | StoreValue[];
@@ -143,7 +144,7 @@ export interface StoreGetRequest {
 
 export function createStoreSetService(store: StoreService): OSService<StoreSetRequest, { ok: true }> {
 	return {
-		name: "store.set",
+		name: STORE_SET,
 		requiredPermissions: ["store:write"],
 		execute: async (req) => {
 			store.set(req.key, req.value);
@@ -154,7 +155,7 @@ export function createStoreSetService(store: StoreService): OSService<StoreSetRe
 
 export function createStoreGetService(store: StoreService): OSService<StoreGetRequest, { value: StoreValue | undefined }> {
 	return {
-		name: "store.get",
+		name: STORE_GET,
 		requiredPermissions: ["store:read"],
 		execute: async (req) => ({ value: store.get(req.key) }),
 	};

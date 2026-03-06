@@ -6,9 +6,26 @@ import { AppQuotaManager, type AppQuota } from "./quota.js";
 import { AppRegistry } from "./registry.js";
 import { AppRouteRegistry } from "./route-registry.js";
 import { OSError } from "../kernel/errors.js";
-import type { OSService } from "../types/os.js";
+import {
+	APP_DISABLE,
+	APP_ENABLE,
+	APP_INSTALL,
+	APP_INSTALL_ROLLBACK,
+	APP_INSTALL_V1,
+	APP_LIST,
+	APP_PAGE_RENDER,
+	APP_START,
+	APP_STATE_SET,
+	APP_UNINSTALL,
+	APP_UPGRADE,
+	RENDER,
+	RUNTIME_RISK_CONFIRM,
+	RUNTIME_TOOLS_VALIDATE,
+} from "../tokens.js";
+import type { OSService, Token } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 import { randomUUID } from "node:crypto";
+import type { JSXElement } from "@context-ai/ctp";
 
 export class AppManager {
 	readonly registry = new AppRegistry();
@@ -373,17 +390,78 @@ export interface AppServiceHooks {
 }
 
 export interface AppPageRenderer {
-	render(input: {
-		appId: string;
-		page: AppPageEntry;
-		context: { appId: string; sessionId: string; permissions: string[]; workingDirectory: string };
-	}): Promise<{
+	render(input: AppPageRenderInput): Promise<{
 		prompt: string;
 		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
 		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
 		metadata?: Record<string, string>;
 	}>;
 }
+
+export interface AppPageRenderContext {
+	appId: string;
+	sessionId: string;
+	permissions: string[];
+	workingDirectory: string;
+}
+
+export interface AppPageSystemRuntime {
+	execute<Request, Response, Name extends string>(
+		service: Token<Request, Response, Name>,
+		request: Request,
+		context: AppPageRenderContext,
+	): Promise<Response>;
+	execute<Request, Response>(service: string, request: Request, context: AppPageRenderContext): Promise<Response>;
+	listServices?(): string[];
+}
+
+export interface AppPageRenderInput {
+	appId: string;
+	page: AppPageEntry;
+	context: AppPageRenderContext;
+	system: {
+		execute<Request, Response, Name extends string>(
+			service: Token<Request, Response, Name>,
+			request: Request,
+			context: AppPageRenderContext,
+		): Promise<Response>;
+		services: string[];
+	};
+}
+
+function createPageSystemRuntime(
+	systemRuntime: AppPageSystemRuntime | undefined,
+	renderContext: AppPageRenderContext,
+): AppPageRenderInput["system"] {
+	function execute<Request, Response, Name extends string>(
+		service: Token<Request, Response, Name>,
+		request: Request,
+		context?: AppPageRenderContext,
+	): Promise<Response>;
+	function execute<Request, Response>(
+		service: string,
+		request: Request,
+		context?: AppPageRenderContext,
+	): Promise<Response>;
+	function execute(service: string, request: unknown, context?: AppPageRenderContext): Promise<unknown> {
+		if (!systemRuntime) {
+			throw new OSError(
+				"E_SERVICE_NOT_FOUND",
+				`App page system runtime is not configured for service call: ${service}`,
+			);
+		}
+		return systemRuntime.execute(service, request, context ?? renderContext);
+	}
+
+	return {
+		execute,
+		services: systemRuntime?.listServices?.() ?? [],
+	};
+}
+
+export type PageResult = JSXElement | (() => JSXElement | Promise<JSXElement>);
+
+export type Page = (input: AppPageRenderInput) => PageResult | Promise<PageResult>;
 
 export function createAppInstallService(
 	manager: AppManager,
@@ -395,7 +473,7 @@ export function createAppInstallService(
 		return next.entry.pages.filter((item) => !previousRoutes.has(item.route)).length;
 	};
 	return {
-		name: "app.install",
+		name: APP_INSTALL,
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => {
 			const next = normalizeManifest(req.manifest);
@@ -433,7 +511,7 @@ export function createAppInstallRollbackService(
 	hooks?: AppServiceHooks,
 ): OSService<AppInstallRollbackRequest, { ok: true; restoredVersion?: string; uninstalled: boolean }> {
 	return {
-		name: "app.install.rollback",
+		name: APP_INSTALL_ROLLBACK,
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => {
 			const snapshot = manager.consumeRollbackSnapshot(req.rollbackToken, { appId: req.appId });
@@ -514,7 +592,7 @@ export function createAppInstallV1Service(
 ): OSService<AppInstallV1Request, { ok: true; report: AppInstallDeltaReport }> {
 	const baseInstall = createAppInstallService(manager, hooks);
 	return {
-		name: "app.install.v1",
+		name: APP_INSTALL_V1,
 		requiredPermissions: ["app:manage"],
 		execute: async (req, ctx) => {
 			if (req.requireSignature) {
@@ -547,7 +625,7 @@ export function createAppUpgradeService(
 	hooks?: AppServiceHooks,
 ): OSService<AppUpgradeRequest, { ok: true }> {
 	return {
-		name: "app.upgrade",
+		name: APP_UPGRADE,
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => {
 			manager.upgrade(req.manifest);
@@ -559,7 +637,7 @@ export function createAppUpgradeService(
 
 export function createAppSetStateService(manager: AppManager): OSService<AppSetStateRequest, { state: AppLifecycleState }> {
 	return {
-		name: "app.state.set",
+		name: APP_STATE_SET,
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => ({
 			state: manager.setState(req.appId, req.state),
@@ -569,7 +647,7 @@ export function createAppSetStateService(manager: AppManager): OSService<AppSetS
 
 export function createAppListService(manager: AppManager): OSService<AppListRequest, { apps: AppManifest[] }> {
 	return {
-		name: "app.list",
+		name: APP_LIST,
 		requiredPermissions: ["app:read"],
 		execute: async () => ({
 			apps: manager.registry.list(),
@@ -582,7 +660,7 @@ export function createAppUninstallService(
 	hooks?: AppServiceHooks,
 ): OSService<AppManageRequest, { ok: true }> {
 	return {
-		name: "app.uninstall",
+		name: APP_UNINSTALL,
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => {
 			manager.uninstall(req.appId);
@@ -594,7 +672,7 @@ export function createAppUninstallService(
 
 export function createAppDisableService(manager: AppManager): OSService<AppManageRequest, { ok: true }> {
 	return {
-		name: "app.disable",
+		name: APP_DISABLE,
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => {
 			manager.disable(req.appId);
@@ -605,7 +683,7 @@ export function createAppDisableService(manager: AppManager): OSService<AppManag
 
 export function createAppEnableService(manager: AppManager): OSService<AppManageRequest, { ok: true }> {
 	return {
-		name: "app.enable",
+		name: APP_ENABLE,
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => {
 			manager.enable(req.appId);
@@ -617,6 +695,7 @@ export function createAppEnableService(manager: AppManager): OSService<AppManage
 export function createAppPageRenderService(
 	manager: AppManager,
 	renderer: AppPageRenderer,
+	systemRuntime?: AppPageSystemRuntime,
 ): OSService<
 	{ route: string },
 	{
@@ -628,12 +707,13 @@ export function createAppPageRenderService(
 		metadata?: Record<string, string>;
 	}
 > {
-	return createRouteRenderService("app.page.render", manager, renderer);
+	return createRouteRenderService(APP_PAGE_RENDER, manager, renderer, systemRuntime);
 }
 
 export function createRenderService(
 	manager: AppManager,
 	renderer: AppPageRenderer,
+	systemRuntime?: AppPageSystemRuntime,
 ): OSService<
 	{ route: string },
 	{
@@ -645,13 +725,14 @@ export function createRenderService(
 		metadata?: Record<string, string>;
 	}
 > {
-	return createRouteRenderService("render", manager, renderer);
+	return createRouteRenderService(RENDER, manager, renderer, systemRuntime);
 }
 
 function createRouteRenderService(
-	name: "app.page.render" | "render",
+	name: typeof APP_PAGE_RENDER | typeof RENDER,
 	manager: AppManager,
 	renderer: AppPageRenderer,
+	systemRuntime?: AppPageSystemRuntime,
 ): OSService<
 	{ route: string },
 	{
@@ -676,15 +757,17 @@ function createRouteRenderService(
 				throw new OSError("E_APP_NOT_REGISTERED", `App is disabled: ${resolved.appId}`);
 			}
 			try {
+				const renderContext: AppPageRenderContext = {
+					appId: resolved.appId,
+					sessionId: ctx.sessionId,
+					permissions: ctx.permissions,
+					workingDirectory: ctx.workingDirectory,
+				};
 				const rendered = await renderer.render({
 					appId: resolved.appId,
 					page: resolved.page,
-					context: {
-						appId: ctx.appId,
-						sessionId: ctx.sessionId,
-						permissions: ctx.permissions,
-						workingDirectory: ctx.workingDirectory,
-					},
+					context: renderContext,
+					system: createPageSystemRuntime(systemRuntime, renderContext),
 				});
 				manager.routes.recordRender(req.route, { success: true });
 				return {
@@ -709,6 +792,7 @@ function createRouteRenderService(
 export function createAppStartService(
 	manager: AppManager,
 	renderer: AppPageRenderer,
+	systemRuntime?: AppPageSystemRuntime,
 ): OSService<
 	AppStartRequest,
 	{
@@ -722,7 +806,7 @@ export function createAppStartService(
 	}
 > {
 	return {
-		name: "app.start",
+		name: APP_START,
 		requiredPermissions: ["app:read"],
 		execute: async (req, ctx) => {
 			const manifest = manager.registry.get(req.appId);
@@ -737,18 +821,20 @@ export function createAppStartService(
 			if (resolved.appId !== req.appId) {
 				throw new OSError("E_VALIDATION_FAILED", `Route ${route} does not belong to app ${req.appId}`);
 			}
-			ensureRunningState(manager, req.appId);
 			try {
+				const renderContext: AppPageRenderContext = {
+					appId: resolved.appId,
+					sessionId: ctx.sessionId,
+					permissions: ctx.permissions,
+					workingDirectory: ctx.workingDirectory,
+				};
 				const rendered = await renderer.render({
 					appId: resolved.appId,
 					page: resolved.page,
-					context: {
-						appId: ctx.appId,
-						sessionId: ctx.sessionId,
-						permissions: ctx.permissions,
-						workingDirectory: ctx.workingDirectory,
-					},
+					context: renderContext,
+					system: createPageSystemRuntime(systemRuntime, renderContext),
 				});
+				ensureRunningState(manager, req.appId);
 				manager.routes.recordRender(route, { success: true });
 				return {
 					appId: resolved.appId,
@@ -805,7 +891,7 @@ export function createRuntimeToolsValidateService(
 	}
 > {
 	return {
-		name: "runtime.tools.validate",
+		name: RUNTIME_TOOLS_VALIDATE,
 		requiredPermissions: ["app:read"],
 		execute: async (req) => {
 			const resolved = manager.routes.resolve(req.route);
@@ -855,7 +941,7 @@ export function createRuntimeRiskConfirmService(): OSService<
 	}
 > {
 	return {
-		name: "runtime.risk.confirm",
+		name: RUNTIME_RISK_CONFIRM,
 		requiredPermissions: ["app:read"],
 		execute: async (req) => {
 			if (req.riskLevel === "low") {

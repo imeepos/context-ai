@@ -1,4 +1,4 @@
-import type { JSXElement } from '../core/types';
+import type { JSXElement } from '../core/types.js';
 export interface DataProps<T = unknown> {
   source: string | T | T[];
   format?: 'table' | 'list' | 'json' | 'tree' | 'csv';

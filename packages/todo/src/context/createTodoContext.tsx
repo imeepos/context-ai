@@ -1,19 +1,25 @@
 /** @jsx jsx */
 import { jsx, Context, Text, Group, Tool, Data } from '@context-ai/ctp';
 import { AddTodoParams, IdParams, EmptyParams, type TodoItem } from '../todo/types.js';
-import { getTodoItems } from '../todo/getTodoItems.js';
 import { renderTodoLine } from '../todo/renderTodoLine.js';
-import { addTodo } from '../tools/addTodo.js';
-import { toggleTodo } from '../tools/toggleTodo.js';
-import { deleteTodo } from '../tools/deleteTodo.js';
-import { clearTodos } from '../tools/clearTodos.js';
+import { TodoRuntimeContext } from '../runtime/TodoRuntimeContext.js';
+import { createAddTodoTool } from '../tools/addTodo.js';
+import { createToggleTodoTool } from '../tools/toggleTodo.js';
+import { createDeleteTodoTool } from '../tools/deleteTodo.js';
+import { createClearTodosTool } from '../tools/clearTodos.js';
 
-export function createTodoContext() {
+export async function createTodoContext(runtime: TodoRuntimeContext) {
+  const items = await runtime.listItems();
+  const addTodo = createAddTodoTool(runtime.createToolRuntime('addTodo'));
+  const toggleTodo = createToggleTodoTool(runtime.createToolRuntime('toggleTodo'));
+  const deleteTodo = createDeleteTodoTool(runtime.createToolRuntime('deleteTodo'));
+  const clearTodos = createClearTodosTool(runtime.createToolRuntime('clearTodos'));
+
   return (
     <Context name="Todo Demo" description="Simple TODO List demo using CTP" metadata={{ author: "杨明明", version: `1.0.0`, currentTime: new Date() }}>
       <Group title="Todo List">
         <Text>Current items:</Text>
-        <Data<TodoItem> title="Todo List" source={getTodoItems()} render={renderTodoLine} />
+        <Data<TodoItem> title="Todo List" source={items} render={renderTodoLine} />
       </Group>
       <Tool
         name="addTodo"

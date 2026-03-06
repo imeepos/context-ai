@@ -1,7 +1,13 @@
-import type { OSService } from "../types/os.js";
-import type { AppManager, AppPageRenderer } from "../app-manager/index.js";
+import type { OSService, Token } from "../types/os.js";
+import type { AppManager, AppPageRenderContext, AppPageRenderer, AppPageSystemRuntime } from "../app-manager/index.js";
+import type { AppManifestV1 } from "../app-manager/manifest.js";
 import type { ModelService } from "../model-service/index.js";
 import { OSError } from "../kernel/errors.js";
+import {
+	TASK_DECOMPOSE,
+	TASK_LOOP,
+	TASK_SUBMIT,
+} from "../tokens.js";
 
 export interface TaskSubmitRequest {
 	text: string;
@@ -47,8 +53,33 @@ export interface TaskDecomposeResponse {
 	tasks: string[];
 }
 
-function resolveDefaultRoute(appManager: AppManager): string {
-	const app = appManager.registry.list()[0];
+export function createSystemTaskManifest(pagePath: string): AppManifestV1 {
+	return {
+		id: "system",
+		name: "System Task",
+		version: "1.0.0",
+		entry: {
+			pages: [
+				{
+					id: "task",
+					route: "system://task",
+					name: "Task",
+					description: "Default task runtime page",
+					path: pagePath,
+					default: true,
+				},
+			],
+		},
+		permissions: ["app:read", "model:invoke"],
+	};
+}
+
+function resolveDefaultRoute(appManager: AppManager, preferredAppId?: string): string {
+	const installed = appManager.registry.list();
+	const app =
+		(preferredAppId ? installed.find((item) => item.id === preferredAppId) : undefined) ??
+		installed.find((item) => item.id !== "system") ??
+		installed[0];
 	if (!app) {
 		throw new OSError("E_APP_NOT_REGISTERED", "No installed app");
 	}
@@ -63,14 +94,15 @@ export function createTaskSubmitService(
 	appManager: AppManager,
 	pageRenderer: AppPageRenderer,
 	modelService: ModelService,
+	systemRuntime: AppPageSystemRuntime,
 ): OSService<TaskSubmitRequest, TaskSubmitResponse> {
-	const loopService = createTaskLoopService(appManager, pageRenderer, modelService);
+	const loopService = createTaskLoopService(appManager, pageRenderer, modelService, systemRuntime);
 	const decomposeService = createTaskDecomposeService();
 	return {
-		name: "task.submit",
+		name: TASK_SUBMIT,
 		requiredPermissions: ["app:read", "model:invoke"],
 		execute: async (req, ctx) => {
-			const route = req.route ?? resolveDefaultRoute(appManager);
+			const route = req.route ?? resolveDefaultRoute(appManager, ctx.appId);
 			const decomposed = await decomposeService.execute({ text: req.text }, ctx);
 			const taskGoal = decomposed.tasks.join("\n- ");
 			const loop = await loopService.execute(
@@ -98,7 +130,7 @@ export function createTaskSubmitService(
 
 export function createTaskDecomposeService(): OSService<TaskDecomposeRequest, TaskDecomposeResponse> {
 	return {
-		name: "task.decompose",
+		name: TASK_DECOMPOSE,
 		requiredPermissions: ["app:read"],
 		execute: async (req) => {
 			const maxParts = req.maxParts && req.maxParts > 0 ? req.maxParts : 8;
@@ -118,9 +150,10 @@ export function createTaskLoopService(
 	appManager: AppManager,
 	pageRenderer: AppPageRenderer,
 	modelService: ModelService,
+	systemRuntime: AppPageSystemRuntime,
 ): OSService<TaskLoopRequest, TaskLoopResponse> {
 	return {
-		name: "task.loop",
+		name: TASK_LOOP,
 		requiredPermissions: ["app:read", "model:invoke"],
 		execute: async (req, ctx) => {
 			const startedAt = Date.now();
@@ -130,14 +163,32 @@ export function createTaskLoopService(
 			const stopCondition = req.stopCondition ?? "DONE";
 			const model = req.model ?? "echo";
 			const resolved = appManager.routes.resolve(req.route);
+			const renderContext: AppPageRenderContext = {
+				appId: resolved.appId,
+				sessionId: ctx.sessionId,
+				permissions: ctx.permissions,
+				workingDirectory: ctx.workingDirectory,
+			};
+			function execute<Request, Response, Name extends string>(
+				service: Token<Request, Response, Name>,
+				request: Request,
+				context?: AppPageRenderContext,
+			): Promise<Response>;
+			function execute<Request, Response>(
+				service: string,
+				request: Request,
+				context?: AppPageRenderContext,
+			): Promise<Response>;
+			function execute(service: string, request: unknown, context?: AppPageRenderContext): Promise<unknown> {
+				return systemRuntime.execute(service, request, context ?? renderContext);
+			}
 			const rendered = await pageRenderer.render({
 				appId: resolved.appId,
 				page: resolved.page,
-				context: {
-					appId: ctx.appId,
-					sessionId: ctx.sessionId,
-					permissions: ctx.permissions,
-					workingDirectory: ctx.workingDirectory,
+				context: renderContext,
+				system: {
+					execute,
+					services: systemRuntime.listServices?.() ?? [],
 				},
 			});
 			let steps = 0;

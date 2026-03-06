@@ -1,5 +1,19 @@
 import type { EventBus } from "../kernel/event-bus.js";
 import { OSError } from "../kernel/errors.js";
+import {
+	NOTIFICATION_ACK,
+	NOTIFICATION_ACK_ALL,
+	NOTIFICATION_CHANNEL_CONFIGURE,
+	NOTIFICATION_CHANNEL_STATS,
+	NOTIFICATION_CLEANUP,
+	NOTIFICATION_LIST,
+	NOTIFICATION_MUTE,
+	NOTIFICATION_MUTE_LIST,
+	NOTIFICATION_POLICY_UPDATE,
+	NOTIFICATION_SEND,
+	NOTIFICATION_STATS,
+	NOTIFICATION_UNMUTE,
+} from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
 export type NotificationSeverity = "info" | "warning" | "error" | "critical";
@@ -566,7 +580,7 @@ export function createNotificationSendService(
 	notification: NotificationService,
 ): OSService<NotifyRequest, { sent: boolean }> {
 	return {
-		name: "notification.send",
+		name: NOTIFICATION_SEND,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => {
 			return { sent: notification.send(req) };
@@ -578,7 +592,7 @@ export function createNotificationListService(
 	notification: NotificationService,
 ): OSService<NotificationListRequest, { notifications: NotificationRecord[] }> {
 	return {
-		name: "notification.list",
+		name: NOTIFICATION_LIST,
 		requiredPermissions: ["notification:read"],
 		execute: async (req) => ({
 			notifications: notification.query(req),
@@ -590,7 +604,7 @@ export function createNotificationMuteService(
 	notification: NotificationService,
 ): OSService<MuteTopicRequest, { muted: true }> {
 	return {
-		name: "notification.mute",
+		name: NOTIFICATION_MUTE,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => {
 			notification.muteTopic(req);
@@ -603,7 +617,7 @@ export function createNotificationUnmuteService(
 	notification: NotificationService,
 ): OSService<{ topic: string }, { unmuted: boolean }> {
 	return {
-		name: "notification.unmute",
+		name: NOTIFICATION_UNMUTE,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => ({
 			unmuted: notification.unmuteTopic(req.topic),
@@ -615,7 +629,7 @@ export function createNotificationMuteListService(
 	notification: NotificationService,
 ): OSService<Record<string, never>, { mutes: NotificationMuteRecord[] }> {
 	return {
-		name: "notification.mute.list",
+		name: NOTIFICATION_MUTE_LIST,
 		requiredPermissions: ["notification:read"],
 		execute: async () => ({
 			mutes: notification.listMutes(),
@@ -627,7 +641,7 @@ export function createNotificationStatsService(
 	notification: NotificationService,
 ): OSService<Record<string, never>, { stats: NotificationStats }> {
 	return {
-		name: "notification.stats",
+		name: NOTIFICATION_STATS,
 		requiredPermissions: ["notification:read"],
 		execute: async () => ({
 			stats: notification.getStats(),
@@ -639,7 +653,7 @@ export function createNotificationAckService(
 	notification: NotificationService,
 ): OSService<NotificationAckRequest, { acknowledged: number }> {
 	return {
-		name: "notification.ack",
+		name: NOTIFICATION_ACK,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => ({
 			acknowledged: notification.ack(req),
@@ -651,7 +665,7 @@ export function createNotificationAckAllService(
 	notification: NotificationService,
 ): OSService<NotificationAckAllRequest, { acknowledged: number }> {
 	return {
-		name: "notification.ackAll",
+		name: NOTIFICATION_ACK_ALL,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => ({
 			acknowledged: notification.ackAll(req),
@@ -663,7 +677,7 @@ export function createNotificationCleanupService(
 	notification: NotificationService,
 ): OSService<NotificationCleanupRequest, { notifications: number; mutes: number }> {
 	return {
-		name: "notification.cleanup",
+		name: NOTIFICATION_CLEANUP,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => notification.cleanup(req),
 	};
@@ -673,7 +687,7 @@ export function createNotificationPolicyUpdateService(
 	notification: NotificationService,
 ): OSService<NotificationPolicyPatch, { policy: ReturnType<NotificationService["getPolicy"]> }> {
 	return {
-		name: "notification.policy.update",
+		name: NOTIFICATION_POLICY_UPDATE,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => ({
 			policy: notification.updatePolicy(req),
@@ -685,7 +699,7 @@ export function createNotificationChannelConfigureService(
 	notification: NotificationService,
 ): OSService<NotificationChannelsConfig, { configured: string[] }> {
 	return {
-		name: "notification.channel.configure",
+		name: NOTIFICATION_CHANNEL_CONFIGURE,
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => notification.configureChannels(req),
 	};
@@ -695,7 +709,7 @@ export function createNotificationChannelStatsService(
 	notification: NotificationService,
 ): OSService<Record<string, never>, { channels: ReturnType<NotificationService["getChannelStats"]> }> {
 	return {
-		name: "notification.channel.stats",
+		name: NOTIFICATION_CHANNEL_STATS,
 		requiredPermissions: ["notification:read"],
 		execute: async () => ({
 			channels: notification.getChannelStats(),

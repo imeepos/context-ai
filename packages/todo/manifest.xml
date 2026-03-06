@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<application id="app.todo" name="Todo" version="1.0.0">
+  <entry>
+    <page
+      id="main"
+      route="app.todo://main"
+      name="Todo Main"
+      description="Todo list page"
+      path="./src/context/createTodoContext.tsx"
+      default="true"
+    />
+  </entry>
+  <permissions>
+    <permission>app:read</permission>
+    <permission>store:read</permission>
+    <permission>store:write</permission>
+  </permissions>
+  <metadata>
+    <item key="source" value="@context-ai/todo" />
+  </metadata>
+</application>

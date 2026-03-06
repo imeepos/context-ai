@@ -1,5 +1,11 @@
+﻿import { isAbsolute, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
 	AppManager,
+	type AppPageRenderInput,
+	type AppPageRenderContext,
+	type AppPageSystemRuntime,
+	type Page,
 	createAppDisableService,
 	createAppEnableService,
 	createAppInstallV1Service,
@@ -74,7 +80,12 @@ import {
 	createShellExecuteService,
 } from "./shell-service/index.js";
 import { StoreService, createStoreGetService, createStoreSetService, type StoreValue } from "./store-service/index.js";
-import { createTaskDecomposeService, createTaskLoopService, createTaskSubmitService } from "./task-runtime/index.js";
+import {
+	createSystemTaskManifest,
+	createTaskDecomposeService,
+	createTaskLoopService,
+	createTaskSubmitService,
+} from "./task-runtime/index.js";
 import {
 	createPlannerComposeToolsService,
 	createPlannerSelectAppsService,
@@ -164,11 +175,82 @@ import {
 	createSystemGovernanceStateRecoverService,
 	createSystemTopologyService,
 } from "./system-service/index.js";
-import type { OSService, PathPolicyRule } from "./types/os.js";
+import {
+	APP_DISABLE,
+	APP_ENABLE,
+	APP_INSTALL,
+	APP_INSTALL_ROLLBACK,
+	APP_INSTALL_V1,
+	APP_LIST,
+	APP_PAGE_RENDER,
+	APP_START,
+	APP_STATE_SET,
+	APP_UNINSTALL,
+	APP_UPGRADE,
+	FILE_EDIT,
+	FILE_FIND,
+	FILE_GREP,
+	FILE_LIST,
+	FILE_READ,
+	FILE_WRITE,
+	HOST_EXECUTE,
+	MEDIA_INSPECT,
+	MODEL_GENERATE,
+	NET_REQUEST,
+	NOTIFICATION_ACK,
+	NOTIFICATION_ACK_ALL,
+	NOTIFICATION_CHANNEL_CONFIGURE,
+	NOTIFICATION_CHANNEL_STATS,
+	NOTIFICATION_CLEANUP,
+	NOTIFICATION_LIST,
+	NOTIFICATION_MUTE,
+	NOTIFICATION_MUTE_LIST,
+	NOTIFICATION_POLICY_UPDATE,
+	NOTIFICATION_SEND,
+	NOTIFICATION_STATS,
+	NOTIFICATION_UNMUTE,
+	PACKAGE_INSTALL,
+	PACKAGE_LIST,
+	PLANNER_COMPOSE_TOOLS,
+	PLANNER_SELECT_APPS,
+	RENDER,
+	RUNTIME_RISK_CONFIRM,
+	RUNTIME_TOOLS_VALIDATE,
+	SCHEDULER_CANCEL,
+	SCHEDULER_FAILURES_CLEAR,
+	SCHEDULER_FAILURES_REPLAY,
+	SCHEDULER_LIST,
+	SCHEDULER_SCHEDULE_INTERVAL,
+	SCHEDULER_SCHEDULE_ONCE,
+	SCHEDULER_STATE_EXPORT,
+	SCHEDULER_STATE_IMPORT,
+	SCHEDULER_STATE_PERSIST,
+	SCHEDULER_STATE_RECOVER,
+	SECURITY_REDACT,
+	SHELL_ENV_LIST,
+	SHELL_ENV_SET,
+	SHELL_ENV_UNSET,
+	SHELL_EXECUTE,
+	RUNNER_EXECUTE_PLAN,
+	STORE_GET,
+	STORE_SET,
+	TASK_DECOMPOSE,
+	TASK_LOOP,
+	TASK_SUBMIT,
+	UI_RENDER,
+} from "./tokens.js";
+import * as TOKENS from "./tokens.js";
+import type {
+	OSService,
+	PathPolicyRule,
+	ServiceRequest,
+	ServiceResponse,
+	Token,
+} from "./types/os.js";
 import { UIService, createUIRenderService } from "./ui-service/index.js";
 import { PolicyEngine } from "./kernel/policy-engine.js";
 
-export interface DefaultLLMOS {
+export interface DefaultLLMOS<TTokens extends Record<string, Token<unknown, unknown>> = Record<string, Token<unknown, unknown>>> {
 	kernel: LLMOSKernel;
 	appManager: AppManager;
 	fileService: FileService;
@@ -184,6 +266,7 @@ export interface DefaultLLMOS {
 	packageService: PackageService;
 	hostAdapters: HostAdapterRegistry;
 	tenantQuotaGovernor: TenantQuotaGovernor;
+	serviceTokens: TTokens;
 }
 
 export interface CreateDefaultLLMOSOptions {
@@ -199,7 +282,14 @@ export interface CreateDefaultLLMOSOptions {
 	enabledServices?: Partial<Record<string, boolean>>;
 }
 
-export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): DefaultLLMOS {
+type AppPageModule = {
+	entryPage?: Page;
+	getContext?: Page;
+	createContext?: Page;
+	default?: Page;
+};
+
+export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}) {
 	const policy = new PolicyEngine({
 		pathRule: options.pathPolicy ?? { allow: [], deny: [] },
 	});
@@ -256,19 +346,88 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		security: securityService,
 	});
 	const hostAdapters = new HostAdapterRegistry();
+	function executeAppPageService<Request, Response, Name extends string>(
+		service: Token<Request, Response, Name>,
+		request: Request,
+		context: AppPageRenderContext,
+	): Promise<Response>;
+	function executeAppPageService<Request, Response>(
+		service: string,
+		request: Request,
+		context: AppPageRenderContext,
+	): Promise<Response>;
+	function executeAppPageService(
+		service: string,
+		request: unknown,
+		context: AppPageRenderContext,
+	): Promise<unknown> {
+		return kernel.execute(service, request, context);
+	}
+	const appPageSystemRuntime: AppPageSystemRuntime = {
+		execute: executeAppPageService,
+		listServices: () => kernel.services.list(),
+	};
+	const systemTaskPagePath = fileURLToPath(new URL("./task-runtime/system-task.page.js", import.meta.url));
+	const systemTaskManifest = createSystemTaskManifest(systemTaskPagePath);
+	appManager.install(systemTaskManifest);
+	kernel.capabilities.set(systemTaskManifest.id, systemTaskManifest.permissions);
 	const appPageRenderer = {
 		render: async ({
 			page,
 			appId,
-		}: {
-			appId: string;
-			page: { name: string; description: string; route: string; path: string };
-			context: { appId: string; sessionId: string; permissions: string[]; workingDirectory: string };
-		}) => ({
-			prompt: `App ${appId} page ${page.name}: ${page.description}`,
-			tools: [],
-			metadata: { route: page.route, path: page.path },
-		}),
+			context,
+		}: AppPageRenderInput) => {
+			const resolvedPath = isAbsolute(page.path)
+				? page.path
+				: resolve(context.workingDirectory, page.path);
+			const pageModule = (await import(pathToFileURL(resolvedPath).href)) as AppPageModule;
+			const contextFactory: Page | undefined =
+				typeof pageModule.entryPage === "function"
+					? pageModule.entryPage
+					: typeof pageModule.getContext === "function"
+						? pageModule.getContext
+						: typeof pageModule.createContext === "function"
+							? pageModule.createContext
+							: typeof pageModule.default === "function"
+								? pageModule.default
+								: undefined;
+			if (!contextFactory) {
+				throw new Error(
+					`Invalid app page module: ${resolvedPath}. Expected one of exports: entryPage/getContext/createContext/default`,
+				);
+			}
+			const ctpNode = await contextFactory({
+				appId,
+				page,
+				context,
+				system: {
+					execute: executeAppPageService,
+					services: kernel.services.list(),
+				}
+			});
+			const { render: renderCTP } = await import("@context-ai/ctp");
+			const rendered = await renderCTP(ctpNode);
+			return {
+				prompt: rendered.prompt,
+				tools: (rendered.tools ?? []).map((tool) => ({
+					name: tool.name,
+					description: tool.description,
+					parameters: tool.parameters,
+				})),
+				dataViews: (rendered.dataViews ?? []).map((dataView) => ({
+					title: dataView.title ?? "Untitled",
+					format: dataView.format,
+					fields: dataView.fields,
+				})),
+				metadata: {
+					route: page.route,
+					path: page.path,
+					...Object.fromEntries(
+						Object.entries(rendered.metadata ?? {}).map(([key, value]) => [key, String(value)]),
+					),
+				},
+			};
+		},
 	};
 
 	modelService.register({
@@ -277,26 +436,21 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	});
 
 	const isEnabled = (serviceName: string): boolean => options.enabledServices?.[serviceName] ?? true;
-	const registerWhenEnabled = (name: string, factory: () => OSService<unknown, unknown>) => {
-		if (isEnabled(name)) {
-			kernel.registerService(factory());
-		}
-	};
 
-	registerWhenEnabled("file.read", () => createFileReadService(fileService));
-	registerWhenEnabled("file.write", () => createFileWriteService(fileService));
-	registerWhenEnabled("file.list", () => createFileListService(fileService));
-	registerWhenEnabled("file.find", () => createFileFindService(fileService));
-	registerWhenEnabled("file.grep", () => createFileGrepService(fileService));
-	registerWhenEnabled("file.edit", () => createFileEditService(fileService));
-	registerWhenEnabled("app.install", () =>
+	const SERVICES = {
+	[FILE_READ]: () => createFileReadService(fileService),
+	[FILE_WRITE]: () => createFileWriteService(fileService),
+	[FILE_LIST]: () => createFileListService(fileService),
+	[FILE_FIND]: () => createFileFindService(fileService),
+	[FILE_GREP]: () => createFileGrepService(fileService),
+	[FILE_EDIT]: () => createFileEditService(fileService),
+	[APP_INSTALL]: () =>
 		createAppInstallService(appManager, {
 			onInstall: (manifest) => {
 				kernel.capabilities.set(manifest.id, manifest.permissions);
 			},
 		}),
-	);
-	registerWhenEnabled("app.install.rollback", () =>
+	[APP_INSTALL_ROLLBACK]: () =>
 		createAppInstallRollbackService(appManager, {
 			onInstall: (manifest) => {
 				kernel.capabilities.set(manifest.id, manifest.permissions);
@@ -315,186 +469,196 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 				});
 			},
 		}),
-	);
-	registerWhenEnabled("app.install.v1", () =>
+	[APP_INSTALL_V1]: () =>
 		createAppInstallV1Service(appManager, securityService, {
 			onInstall: (manifest) => {
 				kernel.capabilities.set(manifest.id, manifest.permissions);
 			},
 		}),
-	);
-	registerWhenEnabled("app.state.set", () => createAppSetStateService(appManager));
-	registerWhenEnabled("app.list", () => createAppListService(appManager));
-	registerWhenEnabled("app.page.render", () =>
-		createAppPageRenderService(appManager, appPageRenderer),
-	);
-	registerWhenEnabled("render", () => createRenderService(appManager, appPageRenderer));
-	registerWhenEnabled("app.start", () => createAppStartService(appManager, appPageRenderer));
-	registerWhenEnabled("runtime.tools.validate", () => createRuntimeToolsValidateService(appManager));
-	registerWhenEnabled("runtime.risk.confirm", () => createRuntimeRiskConfirmService());
-	registerWhenEnabled("task.submit", () => createTaskSubmitService(appManager, appPageRenderer, modelService));
-	registerWhenEnabled("task.decompose", () => createTaskDecomposeService());
-	registerWhenEnabled("task.loop", () => createTaskLoopService(appManager, appPageRenderer, modelService));
-	registerWhenEnabled("planner.selectApps", () => createPlannerSelectAppsService(appManager));
-	registerWhenEnabled("planner.composeTools", () => createPlannerComposeToolsService(appManager, appPageRenderer));
-	registerWhenEnabled("runner.executePlan", () => createRunnerExecutePlanService(appManager, appPageRenderer, modelService));
-	registerWhenEnabled("app.upgrade", () =>
+	[APP_STATE_SET]: () => createAppSetStateService(appManager),
+	[APP_LIST]: () => createAppListService(appManager),
+	[APP_PAGE_RENDER]: () =>
+		createAppPageRenderService(appManager, appPageRenderer, appPageSystemRuntime),
+	[RENDER]: () => createRenderService(appManager, appPageRenderer, appPageSystemRuntime),
+	[APP_START]: () => createAppStartService(appManager, appPageRenderer, appPageSystemRuntime),
+	[RUNTIME_TOOLS_VALIDATE]: () => createRuntimeToolsValidateService(appManager),
+	[RUNTIME_RISK_CONFIRM]: () => createRuntimeRiskConfirmService(),
+	[TASK_SUBMIT]: () =>
+		createTaskSubmitService(appManager, appPageRenderer, modelService, appPageSystemRuntime),
+	[TASK_DECOMPOSE]: () => createTaskDecomposeService(),
+	[TASK_LOOP]: () =>
+		createTaskLoopService(appManager, appPageRenderer, modelService, appPageSystemRuntime),
+	[PLANNER_SELECT_APPS]: () => createPlannerSelectAppsService(appManager),
+	[PLANNER_COMPOSE_TOOLS]: () => createPlannerComposeToolsService(appManager, appPageRenderer),
+	[RUNNER_EXECUTE_PLAN]: () => createRunnerExecutePlanService(appManager, appPageRenderer, modelService),
+	[APP_UPGRADE]: () =>
 		createAppUpgradeService(appManager, {
 			onUpgrade: (manifest) => {
 				kernel.capabilities.set(manifest.id, manifest.permissions);
 			},
 		}),
-	);
-	registerWhenEnabled("app.uninstall", () =>
+	[APP_UNINSTALL]: () =>
 		createAppUninstallService(appManager, {
 			onUninstall: (appId) => {
 				kernel.capabilities.remove(appId);
 			},
 		}),
-	);
-	registerWhenEnabled("app.disable", () => createAppDisableService(appManager));
-	registerWhenEnabled("app.enable", () => createAppEnableService(appManager));
-	registerWhenEnabled("shell.execute", () => createShellExecuteService(shellService));
-	registerWhenEnabled("shell.env.set", () => createShellEnvSetService(shellService));
-	registerWhenEnabled("shell.env.unset", () => createShellEnvUnsetService(shellService));
-	registerWhenEnabled("shell.env.list", () => createShellEnvListService(shellService));
-	registerWhenEnabled("security.redact", () => createSecurityRedactService(securityService));
-	registerWhenEnabled("store.set", () => createStoreSetService(storeService));
-	registerWhenEnabled("store.get", () => createStoreGetService(storeService));
-	registerWhenEnabled("net.request", () => createNetRequestService(netService));
-	registerWhenEnabled("scheduler.scheduleOnce", () => createSchedulerScheduleOnceService(schedulerService));
-	registerWhenEnabled("scheduler.scheduleInterval", () => createSchedulerScheduleIntervalService(schedulerService));
-	registerWhenEnabled("scheduler.cancel", () => createSchedulerCancelService(schedulerService));
-	registerWhenEnabled("scheduler.list", () => createSchedulerListService(schedulerService));
-	registerWhenEnabled("scheduler.failures.clear", () => createSchedulerFailuresClearService(schedulerService));
-	registerWhenEnabled("scheduler.failures.replay", () => createSchedulerFailuresReplayService(schedulerService));
-	registerWhenEnabled("scheduler.state.export", () => createSchedulerStateExportService(schedulerService));
-	registerWhenEnabled("scheduler.state.import", () => createSchedulerStateImportService(schedulerService));
-	registerWhenEnabled("scheduler.state.persist", () => createSchedulerStatePersistService(schedulerService));
-	registerWhenEnabled("scheduler.state.recover", () => createSchedulerStateRecoverService(schedulerService));
-	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
-	registerWhenEnabled("notification.ack", () => createNotificationAckService(notificationService));
-	registerWhenEnabled("notification.ackAll", () => createNotificationAckAllService(notificationService));
-	registerWhenEnabled("notification.cleanup", () => createNotificationCleanupService(notificationService));
-	registerWhenEnabled("notification.policy.update", () => createNotificationPolicyUpdateService(notificationService));
-	registerWhenEnabled("notification.channel.configure", () =>
+	[APP_DISABLE]: () => createAppDisableService(appManager),
+	[APP_ENABLE]: () => createAppEnableService(appManager),
+	[SHELL_EXECUTE]: () => createShellExecuteService(shellService),
+	[SHELL_ENV_SET]: () => createShellEnvSetService(shellService),
+	[SHELL_ENV_UNSET]: () => createShellEnvUnsetService(shellService),
+	[SHELL_ENV_LIST]: () => createShellEnvListService(shellService),
+	[SECURITY_REDACT]: () => createSecurityRedactService(securityService),
+	[STORE_SET]: () => createStoreSetService(storeService),
+	[STORE_GET]: () => createStoreGetService(storeService),
+	[NET_REQUEST]: () => createNetRequestService(netService),
+	[SCHEDULER_SCHEDULE_ONCE]: () => createSchedulerScheduleOnceService(schedulerService),
+	[SCHEDULER_SCHEDULE_INTERVAL]: () => createSchedulerScheduleIntervalService(schedulerService),
+	[SCHEDULER_CANCEL]: () => createSchedulerCancelService(schedulerService),
+	[SCHEDULER_LIST]: () => createSchedulerListService(schedulerService),
+	[SCHEDULER_FAILURES_CLEAR]: () => createSchedulerFailuresClearService(schedulerService),
+	[SCHEDULER_FAILURES_REPLAY]: () => createSchedulerFailuresReplayService(schedulerService),
+	[SCHEDULER_STATE_EXPORT]: () => createSchedulerStateExportService(schedulerService),
+	[SCHEDULER_STATE_IMPORT]: () => createSchedulerStateImportService(schedulerService),
+	[SCHEDULER_STATE_PERSIST]: () => createSchedulerStatePersistService(schedulerService),
+	[SCHEDULER_STATE_RECOVER]: () => createSchedulerStateRecoverService(schedulerService),
+	[NOTIFICATION_SEND]: () => createNotificationSendService(notificationService),
+	[NOTIFICATION_ACK]: () => createNotificationAckService(notificationService),
+	[NOTIFICATION_ACK_ALL]: () => createNotificationAckAllService(notificationService),
+	[NOTIFICATION_CLEANUP]: () => createNotificationCleanupService(notificationService),
+	[NOTIFICATION_POLICY_UPDATE]: () => createNotificationPolicyUpdateService(notificationService),
+	[NOTIFICATION_CHANNEL_CONFIGURE]: () =>
 		createNotificationChannelConfigureService(notificationService),
-	);
-	registerWhenEnabled("notification.channel.stats", () => createNotificationChannelStatsService(notificationService));
-	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
-	registerWhenEnabled("notification.mute", () => createNotificationMuteService(notificationService));
-	registerWhenEnabled("notification.mute.list", () => createNotificationMuteListService(notificationService));
-	registerWhenEnabled("notification.unmute", () => createNotificationUnmuteService(notificationService));
-	registerWhenEnabled("notification.stats", () => createNotificationStatsService(notificationService));
-	registerWhenEnabled("media.inspect", () => createMediaInspectService(mediaService));
-	registerWhenEnabled("ui.render", () => createUIRenderService(uiService));
-	registerWhenEnabled("model.generate", () => createModelGenerateService(modelService));
-	registerWhenEnabled("package.install", () => createPackageInstallService(packageService));
-	registerWhenEnabled("package.list", () => createPackageListService(packageService));
-	registerWhenEnabled("host.execute", () => createHostAdapterExecuteService(hostAdapters));
-	registerWhenEnabled("system.health", () => createSystemHealthService(kernel));
-	registerWhenEnabled("system.dependencies", () => createSystemDependenciesService(kernel));
-	registerWhenEnabled("system.routes", () => createSystemRoutesService(appManager));
-	registerWhenEnabled("system.routes.stats", () => createSystemRoutesStatsService(appManager));
-	registerWhenEnabled("system.app.install.report", () => createSystemAppInstallReportService(appManager));
-	registerWhenEnabled("system.app.delta", () => createSystemAppDeltaService(appManager));
-	registerWhenEnabled("system.app.rollback.state.export", () => createSystemAppRollbackStateExportService(appManager));
-	registerWhenEnabled("system.app.rollback.state.import", () => createSystemAppRollbackStateImportService(appManager));
-	registerWhenEnabled("system.app.rollback.state.persist", () =>
+	[NOTIFICATION_CHANNEL_STATS]: () => createNotificationChannelStatsService(notificationService),
+	[NOTIFICATION_LIST]: () => createNotificationListService(notificationService),
+	[NOTIFICATION_MUTE]: () => createNotificationMuteService(notificationService),
+	[NOTIFICATION_MUTE_LIST]: () => createNotificationMuteListService(notificationService),
+	[NOTIFICATION_UNMUTE]: () => createNotificationUnmuteService(notificationService),
+	[NOTIFICATION_STATS]: () => createNotificationStatsService(notificationService),
+	[MEDIA_INSPECT]: () => createMediaInspectService(mediaService),
+	[UI_RENDER]: () => createUIRenderService(uiService),
+	[MODEL_GENERATE]: () => createModelGenerateService(modelService),
+	[PACKAGE_INSTALL]: () => createPackageInstallService(packageService),
+	[PACKAGE_LIST]: () => createPackageListService(packageService),
+	[HOST_EXECUTE]: () => createHostAdapterExecuteService(hostAdapters),
+	[TOKENS.SYSTEM_HEALTH]: () => createSystemHealthService(kernel),
+	[TOKENS.SYSTEM_DEPENDENCIES]: () => createSystemDependenciesService(kernel),
+	[TOKENS.SYSTEM_ROUTES]: () => createSystemRoutesService(appManager),
+	[TOKENS.SYSTEM_ROUTES_STATS]: () => createSystemRoutesStatsService(appManager),
+	[TOKENS.SYSTEM_APP_INSTALL_REPORT]: () => createSystemAppInstallReportService(appManager),
+	[TOKENS.SYSTEM_APP_DELTA]: () => createSystemAppDeltaService(appManager),
+	[TOKENS.SYSTEM_APP_ROLLBACK_STATE_EXPORT]: () => createSystemAppRollbackStateExportService(appManager),
+	[TOKENS.SYSTEM_APP_ROLLBACK_STATE_IMPORT]: () => createSystemAppRollbackStateImportService(appManager),
+	[TOKENS.SYSTEM_APP_ROLLBACK_STATE_PERSIST]: () =>
 		createSystemAppRollbackStatePersistService(appManager, storeService),
-	);
-	registerWhenEnabled("system.app.rollback.state.recover", () =>
+	[TOKENS.SYSTEM_APP_ROLLBACK_STATE_RECOVER]: () =>
 		createSystemAppRollbackStateRecoverService(appManager, storeService),
-	);
-	registerWhenEnabled("system.app.rollback.stats", () => createSystemAppRollbackStatsService(appManager));
-	registerWhenEnabled("system.app.rollback.gc", () => createSystemAppRollbackGCService(appManager));
-	registerWhenEnabled("system.app.rollback.audit", () => createSystemAppRollbackAuditService(kernel));
-	registerWhenEnabled("system.metrics", () => createSystemMetricsService(kernel));
-	registerWhenEnabled("system.audit", () => createSystemAuditService(kernel));
-	registerWhenEnabled("system.governance.state.export", () => createSystemGovernanceStateExportService());
-	registerWhenEnabled("system.governance.state.import", () => createSystemGovernanceStateImportService());
-	registerWhenEnabled("system.governance.state.persist", () => createSystemGovernanceStatePersistService(storeService));
-	registerWhenEnabled("system.governance.state.recover", () => createSystemGovernanceStateRecoverService(storeService));
-	registerWhenEnabled("system.audit.keys.rotate", () => createSystemAuditKeysRotateService());
-	registerWhenEnabled("system.audit.keys.list", () => createSystemAuditKeysListService());
-	registerWhenEnabled("system.audit.keys.activate", () => createSystemAuditKeysActivateService());
-	registerWhenEnabled("system.topology", () => createSystemTopologyService(kernel));
-	registerWhenEnabled("system.events", () => createSystemEventsService(kernel));
-	registerWhenEnabled("system.capabilities", () => createSystemCapabilitiesService(kernel));
-	registerWhenEnabled("system.capabilities.list", () => createSystemCapabilitiesListService(kernel));
-	registerWhenEnabled("system.policy", () => createSystemPolicyService(kernel));
-	registerWhenEnabled("system.policy.evaluate", () => createSystemPolicyEvaluateService(kernel));
-	registerWhenEnabled("system.policy.update", () => createSystemPolicyUpdateService(kernel));
-	registerWhenEnabled("system.policy.version.create", () => createSystemPolicyVersionCreateService(kernel));
-	registerWhenEnabled("system.policy.version.list", () => createSystemPolicyVersionListService(kernel));
-	registerWhenEnabled("system.policy.version.rollback", () => createSystemPolicyVersionRollbackService(kernel));
-	registerWhenEnabled("system.policy.simulate.batch", () => createSystemPolicySimulateBatchService(kernel));
-	registerWhenEnabled("system.policy.guard.apply", () => createSystemPolicyGuardApplyService(kernel));
-	registerWhenEnabled("system.net.circuit", () => createSystemNetCircuitService(netService));
-	registerWhenEnabled("system.net.circuit.reset", () => createSystemNetCircuitResetService(netService));
-	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
-	registerWhenEnabled("system.alerts", () => createSystemAlertsService(notificationService));
-	registerWhenEnabled("system.alerts.clear", () => createSystemAlertsClearService(notificationService));
-	registerWhenEnabled("system.alerts.export", () => createSystemAlertsExportService(notificationService));
-	registerWhenEnabled("system.alerts.stats", () => createSystemAlertsStatsService(notificationService));
-	registerWhenEnabled("system.alerts.topics", () => createSystemAlertsTopicsService(notificationService));
-	registerWhenEnabled("system.alerts.unacked", () => createSystemAlertsUnackedService(notificationService));
-	registerWhenEnabled("system.alerts.policy", () => createSystemAlertsPolicyService(notificationService));
-	registerWhenEnabled("system.alerts.trends", () => createSystemAlertsTrendsService(notificationService));
-	registerWhenEnabled("system.alerts.slo", () => createSystemAlertsSLOService(notificationService));
-	registerWhenEnabled("system.alerts.incidents", () => createSystemAlertsIncidentsService(notificationService));
-	registerWhenEnabled("system.alerts.digest", () => createSystemAlertsDigestService(notificationService));
-	registerWhenEnabled("system.alerts.report", () => createSystemAlertsReportService(notificationService));
-	registerWhenEnabled("system.alerts.report.compact", () =>
+	[TOKENS.SYSTEM_APP_ROLLBACK_STATS]: () => createSystemAppRollbackStatsService(appManager),
+	[TOKENS.SYSTEM_APP_ROLLBACK_GC]: () => createSystemAppRollbackGCService(appManager),
+	[TOKENS.SYSTEM_APP_ROLLBACK_AUDIT]: () => createSystemAppRollbackAuditService(kernel),
+	[TOKENS.SYSTEM_METRICS]: () => createSystemMetricsService(kernel),
+	[TOKENS.SYSTEM_AUDIT]: () => createSystemAuditService(kernel),
+	[TOKENS.SYSTEM_GOVERNANCE_STATE_EXPORT]: () => createSystemGovernanceStateExportService(),
+	[TOKENS.SYSTEM_GOVERNANCE_STATE_IMPORT]: () => createSystemGovernanceStateImportService(),
+	[TOKENS.SYSTEM_GOVERNANCE_STATE_PERSIST]: () => createSystemGovernanceStatePersistService(storeService),
+	[TOKENS.SYSTEM_GOVERNANCE_STATE_RECOVER]: () => createSystemGovernanceStateRecoverService(storeService),
+	[TOKENS.SYSTEM_AUDIT_KEYS_ROTATE]: () => createSystemAuditKeysRotateService(),
+	[TOKENS.SYSTEM_AUDIT_KEYS_LIST]: () => createSystemAuditKeysListService(),
+	[TOKENS.SYSTEM_AUDIT_KEYS_ACTIVATE]: () => createSystemAuditKeysActivateService(),
+	[TOKENS.SYSTEM_TOPOLOGY]: () => createSystemTopologyService(kernel),
+	[TOKENS.SYSTEM_EVENTS]: () => createSystemEventsService(kernel),
+	[TOKENS.SYSTEM_CAPABILITIES]: () => createSystemCapabilitiesService(kernel),
+	[TOKENS.SYSTEM_CAPABILITIES_LIST]: () => createSystemCapabilitiesListService(kernel),
+	[TOKENS.SYSTEM_POLICY]: () => createSystemPolicyService(kernel),
+	[TOKENS.SYSTEM_POLICY_EVALUATE]: () => createSystemPolicyEvaluateService(kernel),
+	[TOKENS.SYSTEM_POLICY_UPDATE]: () => createSystemPolicyUpdateService(kernel),
+	[TOKENS.SYSTEM_POLICY_VERSION_CREATE]: () => createSystemPolicyVersionCreateService(kernel),
+	[TOKENS.SYSTEM_POLICY_VERSION_LIST]: () => createSystemPolicyVersionListService(kernel),
+	[TOKENS.SYSTEM_POLICY_VERSION_ROLLBACK]: () => createSystemPolicyVersionRollbackService(kernel),
+	[TOKENS.SYSTEM_POLICY_SIMULATE_BATCH]: () => createSystemPolicySimulateBatchService(kernel),
+	[TOKENS.SYSTEM_POLICY_GUARD_APPLY]: () => createSystemPolicyGuardApplyService(kernel),
+	[TOKENS.SYSTEM_NET_CIRCUIT]: () => createSystemNetCircuitService(netService),
+	[TOKENS.SYSTEM_NET_CIRCUIT_RESET]: () => createSystemNetCircuitResetService(netService),
+	[TOKENS.SYSTEM_SCHEDULER_FAILURES]: () => createSystemSchedulerFailuresService(schedulerService),
+	[TOKENS.SYSTEM_ALERTS]: () => createSystemAlertsService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_CLEAR]: () => createSystemAlertsClearService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_EXPORT]: () => createSystemAlertsExportService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_STATS]: () => createSystemAlertsStatsService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_TOPICS]: () => createSystemAlertsTopicsService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_UNACKED]: () => createSystemAlertsUnackedService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_POLICY]: () => createSystemAlertsPolicyService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_TRENDS]: () => createSystemAlertsTrendsService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_SLO]: () => createSystemAlertsSLOService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_INCIDENTS]: () => createSystemAlertsIncidentsService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_DIGEST]: () => createSystemAlertsDigestService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_REPORT]: () => createSystemAlertsReportService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_REPORT_COMPACT]: () =>
 		createSystemAlertsReportCompactService(notificationService),
-	);
-	registerWhenEnabled("system.alerts.flapping", () => createSystemAlertsFlappingService(notificationService));
-	registerWhenEnabled("system.alerts.timeline", () => createSystemAlertsTimelineService(notificationService));
-	registerWhenEnabled("system.alerts.hotspots", () => createSystemAlertsHotspotsService(notificationService));
-	registerWhenEnabled("system.alerts.recommendations", () =>
+	[TOKENS.SYSTEM_ALERTS_FLAPPING]: () => createSystemAlertsFlappingService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_TIMELINE]: () => createSystemAlertsTimelineService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_HOTSPOTS]: () => createSystemAlertsHotspotsService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_RECOMMENDATIONS]: () =>
 		createSystemAlertsRecommendationsService(notificationService),
-	);
-	registerWhenEnabled("system.alerts.feed", () => createSystemAlertsFeedService(notificationService));
-	registerWhenEnabled("system.alerts.backlog", () => createSystemAlertsBacklogService(notificationService));
-	registerWhenEnabled("system.alerts.breaches", () => createSystemAlertsBreachesService(notificationService));
-	registerWhenEnabled("system.alerts.health", () => createSystemAlertsHealthService(notificationService));
-	registerWhenEnabled("system.alerts.auto-remediate.plan", () =>
+	[TOKENS.SYSTEM_ALERTS_FEED]: () => createSystemAlertsFeedService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_BACKLOG]: () => createSystemAlertsBacklogService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_BREACHES]: () => createSystemAlertsBreachesService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_HEALTH]: () => createSystemAlertsHealthService(notificationService),
+	[TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_PLAN]: () =>
 		createSystemAlertsAutoRemediatePlanService(notificationService, schedulerService, netService),
-	);
-	registerWhenEnabled("system.alerts.auto-remediate.execute", () =>
+	[TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_EXECUTE]: () =>
 		createSystemAlertsAutoRemediateExecuteService(notificationService, schedulerService, netService),
-	);
-	registerWhenEnabled("system.alerts.auto-remediate.audit", () => createSystemAlertsAutoRemediateAuditService());
-	registerWhenEnabled("system.slo", () => createSystemSLOService(kernel, notificationService));
-	registerWhenEnabled("system.slo.rules.upsert", () => createSystemSLORulesUpsertService());
-	registerWhenEnabled("system.slo.rules.list", () => createSystemSLORulesListService());
-	registerWhenEnabled("system.slo.rules.evaluate", () =>
+	[TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_AUDIT]: () => createSystemAlertsAutoRemediateAuditService(),
+	[TOKENS.SYSTEM_SLO]: () => createSystemSLOService(kernel, notificationService),
+	[TOKENS.SYSTEM_SLO_RULES_UPSERT]: () => createSystemSLORulesUpsertService(),
+	[TOKENS.SYSTEM_SLO_RULES_LIST]: () => createSystemSLORulesListService(),
+	[TOKENS.SYSTEM_SLO_RULES_EVALUATE]: () =>
 		createSystemSLORulesEvaluateService(kernel, notificationService),
-	);
-	registerWhenEnabled("system.audit.export", () => createSystemAuditExportService(kernel, securityService));
-	registerWhenEnabled("system.quota", () => createSystemQuotaService(tenantQuotaGovernor));
-	registerWhenEnabled("system.quota.adjust", () => createSystemQuotaAdjustService(tenantQuotaGovernor));
-	registerWhenEnabled("system.quota.policy.upsert", () => createSystemQuotaPolicyUpsertService());
-	registerWhenEnabled("system.quota.policy.list", () => createSystemQuotaPolicyListService());
-	registerWhenEnabled("system.quota.policy.apply", () => createSystemQuotaPolicyApplyService(tenantQuotaGovernor));
-	registerWhenEnabled("system.quota.hotspots", () => createSystemQuotaHotspotsService(tenantQuotaGovernor));
-	registerWhenEnabled("system.quota.hotspots.isolate", () =>
+	[TOKENS.SYSTEM_AUDIT_EXPORT]: () => createSystemAuditExportService(kernel, securityService),
+	[TOKENS.SYSTEM_QUOTA]: () => createSystemQuotaService(tenantQuotaGovernor),
+	[TOKENS.SYSTEM_QUOTA_ADJUST]: () => createSystemQuotaAdjustService(tenantQuotaGovernor),
+	[TOKENS.SYSTEM_QUOTA_POLICY_UPSERT]: () => createSystemQuotaPolicyUpsertService(),
+	[TOKENS.SYSTEM_QUOTA_POLICY_LIST]: () => createSystemQuotaPolicyListService(),
+	[TOKENS.SYSTEM_QUOTA_POLICY_APPLY]: () => createSystemQuotaPolicyApplyService(tenantQuotaGovernor),
+	[TOKENS.SYSTEM_QUOTA_HOTSPOTS]: () => createSystemQuotaHotspotsService(tenantQuotaGovernor),
+	[TOKENS.SYSTEM_QUOTA_HOTSPOTS_ISOLATE]: () =>
 		createSystemQuotaHotspotsIsolateService(tenantQuotaGovernor),
-	);
-	registerWhenEnabled("system.chaos.run", () => createSystemChaosRunService(kernel, notificationService, schedulerService));
-	registerWhenEnabled("system.chaos.baseline.capture", () => createSystemChaosBaselineCaptureService(kernel));
-	registerWhenEnabled("system.chaos.baseline.verify", () => createSystemChaosBaselineVerifyService(kernel));
-	registerWhenEnabled("system.snapshot", () =>
+	[TOKENS.SYSTEM_CHAOS_RUN]: () => createSystemChaosRunService(kernel, notificationService, schedulerService),
+	[TOKENS.SYSTEM_CHAOS_BASELINE_CAPTURE]: () => createSystemChaosBaselineCaptureService(kernel),
+	[TOKENS.SYSTEM_CHAOS_BASELINE_VERIFY]: () => createSystemChaosBaselineVerifyService(kernel),
+	[TOKENS.SYSTEM_SNAPSHOT]: () =>
 		createSystemSnapshotService(kernel, {
 			netService,
 			schedulerService,
 		}),
-	);
-	registerWhenEnabled("system.errors", () => createSystemErrorsService(kernel));
-	registerWhenEnabled("system.errors.export", () => createSystemErrorsExportService(kernel, securityService));
-	registerWhenEnabled("system.errors.keys.rotate", () => createSystemErrorsKeysRotateService());
-	registerWhenEnabled("system.errors.keys.list", () => createSystemErrorsKeysListService());
-	registerWhenEnabled("system.errors.keys.activate", () => createSystemErrorsKeysActivateService());
+	[TOKENS.SYSTEM_ERRORS]: () => createSystemErrorsService(kernel),
+	[TOKENS.SYSTEM_ERRORS_EXPORT]: () => createSystemErrorsExportService(kernel, securityService),
+	[TOKENS.SYSTEM_ERRORS_KEYS_ROTATE]: () => createSystemErrorsKeysRotateService(),
+	[TOKENS.SYSTEM_ERRORS_KEYS_LIST]: () => createSystemErrorsKeysListService(),
+	[TOKENS.SYSTEM_ERRORS_KEYS_ACTIVATE]: () => createSystemErrorsKeysActivateService(),
+} as const satisfies Record<string, () => OSService<unknown, unknown, string>>;
+
+	type ServiceCatalog = typeof SERVICES;
+	type ServiceToken<Name extends keyof ServiceCatalog> = Token<
+		ServiceRequest<ReturnType<ServiceCatalog[Name]>>,
+		ServiceResponse<ReturnType<ServiceCatalog[Name]>>,
+		Extract<Name, string>
+	>;
+
+	const serviceToken = <Name extends keyof ServiceCatalog>(serviceName: Name): ServiceToken<Name> =>
+		serviceName as ServiceToken<Name>;
+
+	const registerWhenEnabled = <Name extends keyof ServiceCatalog>(serviceName: Name): ServiceToken<Name> => {
+		if (isEnabled(serviceName as string)) {
+			const factory = SERVICES[serviceName] as () => OSService<unknown, unknown, string>;
+			kernel.registerService(factory());
+		}
+		return serviceToken(serviceName);
+	};
+
+	const SERVICE_TOKENS = Object.fromEntries(
+		(Object.keys(SERVICES) as Array<keyof ServiceCatalog>).map((serviceName) => [serviceName, registerWhenEnabled(serviceName)]),
+	) as { [Name in keyof ServiceCatalog]: ServiceToken<Name> };
 
 	kernel.events.subscribe<{
 		service: string;
@@ -524,7 +688,10 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		appId: string;
 		traceId: string;
 	}>("kernel.service.executed", (event) => {
-		if (event.payload.service !== "app.install" && event.payload.service !== "app.install.v1") {
+		if (
+			event.payload.service !== SERVICE_TOKENS["app.install"] &&
+			event.payload.service !== SERVICE_TOKENS["app.install.v1"]
+		) {
 			return;
 		}
 		notificationService.send({
@@ -550,5 +717,11 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		packageService,
 		hostAdapters,
 		tenantQuotaGovernor,
+		serviceTokens: SERVICE_TOKENS,
 	};
 }
+
+export type DefaultServiceTokens = ReturnType<typeof createDefaultLLMOS>["serviceTokens"];
+
+
+

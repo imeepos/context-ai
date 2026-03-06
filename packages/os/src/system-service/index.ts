@@ -8,6 +8,7 @@ import type { SecurityService } from "../security-service/index.js";
 import type { TenantQuotaGovernor } from "../kernel/resource-governor.js";
 import type { AppManager } from "../app-manager/index.js";
 import type { AppManifestV1 } from "../app-manager/manifest.js";
+import * as TOKENS from "../tokens.js";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { OSError } from "../kernel/errors.js";
@@ -27,7 +28,7 @@ export interface SystemHealthResponse {
 
 export function createSystemHealthService(kernel: LLMOSKernel): OSService<Record<string, never>, SystemHealthResponse> {
 	return {
-		name: "system.health",
+		name: TOKENS.SYSTEM_HEALTH,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			services: kernel.services.list(),
@@ -71,7 +72,7 @@ export function createSystemRoutesService(
 	appManager: AppManager,
 ): OSService<SystemRoutesRequest, SystemRoutesResponse> {
 	return {
-		name: "system.routes",
+		name: TOKENS.SYSTEM_ROUTES,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			let routes = appManager.routes.listRoutes(req.appId);
@@ -94,7 +95,7 @@ export function createSystemRoutesStatsService(
 	appManager: AppManager,
 ): OSService<SystemRoutesStatsRequest, SystemRoutesStatsResponse> {
 	return {
-		name: "system.routes.stats",
+		name: TOKENS.SYSTEM_ROUTES_STATS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => ({
 			stats: appManager.routes.stats(req.appId),
@@ -121,7 +122,7 @@ export function createSystemAppInstallReportService(
 	appManager: AppManager,
 ): OSService<SystemAppInstallReportRequest, SystemAppInstallReportResponse> {
 	return {
-		name: "system.app.install.report",
+		name: TOKENS.SYSTEM_APP_INSTALL_REPORT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const manifest = appManager.registry.get(req.appId);
@@ -206,7 +207,7 @@ export function createSystemAppDeltaService(
 	appManager: AppManager,
 ): OSService<SystemAppDeltaRequest, SystemAppDeltaResponse> {
 	return {
-		name: "system.app.delta",
+		name: TOKENS.SYSTEM_APP_DELTA,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const list = req.appId ? [appManager.registry.get(req.appId)] : appManager.registry.list();
@@ -227,7 +228,7 @@ export function createSystemAppRollbackStateExportService(
 	appManager: AppManager,
 ): OSService<{ includeSensitive?: boolean }, { state: SystemAppRollbackState }> {
 	return {
-		name: "system.app.rollback.state.export",
+		name: TOKENS.SYSTEM_APP_ROLLBACK_STATE_EXPORT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const state = appManager.exportRollbackState();
@@ -284,7 +285,7 @@ export function createSystemAppRollbackAuditService(
 	}
 > {
 	return {
-		name: "system.app.rollback.audit",
+		name: TOKENS.SYSTEM_APP_ROLLBACK_AUDIT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			let records = kernel.audit.list().filter((item) => item.service === "app.install.rollback");
@@ -321,14 +322,27 @@ export function createSystemAppRollbackStateImportService(
 	appManager: AppManager,
 ): OSService<
 	{ state: ReturnType<AppManager["exportRollbackState"]> },
-	{ imported: true }
+	{
+		imported: true;
+		snapshots: number;
+		installReports: number;
+		stateHash: string;
+		stateSizeBytes: number;
+	}
 > {
 	return {
-		name: "system.app.rollback.state.import",
+		name: TOKENS.SYSTEM_APP_ROLLBACK_STATE_IMPORT,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			appManager.importRollbackState(req.state);
-			return { imported: true };
+			const fp = fingerprintState(req.state);
+			return {
+				imported: true,
+				snapshots: req.state.snapshots.length,
+				installReports: req.state.installReports.length,
+				stateHash: fp.stateHash,
+				stateSizeBytes: fp.stateSizeBytes,
+			};
 		},
 	};
 }
@@ -339,7 +353,7 @@ export function createSystemAppRollbackStatePersistService(
 	key = "system.app.rollback.state",
 ): OSService<Record<string, never>, { persisted: true }> {
 	return {
-		name: "system.app.rollback.state.persist",
+		name: TOKENS.SYSTEM_APP_ROLLBACK_STATE_PERSIST,
 		requiredPermissions: ["system:write"],
 		execute: async () => {
 			store.set(key, appManager.exportRollbackState() as unknown as Record<string, unknown>);
@@ -352,21 +366,54 @@ export function createSystemAppRollbackStateRecoverService(
 	appManager: AppManager,
 	store: { get(key: string): unknown },
 	key = "system.app.rollback.state",
-): OSService<Record<string, never>, { recovered: boolean; reason?: string; errorCode?: string }> {
+): OSService<
+	Record<string, never>,
+	{
+		recovered: boolean;
+		reason?: string;
+		errorCode?: string;
+		snapshots: number;
+		installReports: number;
+		stateHash?: string;
+		stateSizeBytes: number;
+	}
+> {
 	return {
-		name: "system.app.rollback.state.recover",
+		name: TOKENS.SYSTEM_APP_ROLLBACK_STATE_RECOVER,
 		requiredPermissions: ["system:write"],
 		execute: async () => {
 			const raw = store.get(key);
 			if (!raw || typeof raw !== "object") {
-				return { recovered: false, reason: "empty_state" };
+				return {
+					recovered: false,
+					reason: "empty_state",
+					snapshots: 0,
+					installReports: 0,
+					stateSizeBytes: 0,
+				};
 			}
+			const fp = fingerprintState(raw);
 			try {
 				appManager.importRollbackState(raw as ReturnType<AppManager["exportRollbackState"]>);
-				return { recovered: true };
+				const state = raw as ReturnType<AppManager["exportRollbackState"]>;
+				return {
+					recovered: true,
+					snapshots: state.snapshots.length,
+					installReports: state.installReports.length,
+					stateHash: fp.stateHash,
+					stateSizeBytes: fp.stateSizeBytes,
+				};
 			} catch (error) {
 				if (error instanceof OSError) {
-					return { recovered: false, reason: "invalid_state", errorCode: error.code };
+					return {
+						recovered: false,
+						reason: "invalid_state",
+						errorCode: error.code,
+						snapshots: 0,
+						installReports: 0,
+						stateHash: fp.stateHash,
+						stateSizeBytes: fp.stateSizeBytes,
+					};
 				}
 				throw error;
 			}
@@ -378,7 +425,7 @@ export function createSystemAppRollbackStatsService(
 	appManager: AppManager,
 ): OSService<SystemAppRollbackStatsRequest, SystemAppRollbackStatsResponse> {
 	return {
-		name: "system.app.rollback.stats",
+		name: TOKENS.SYSTEM_APP_ROLLBACK_STATS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const snapshots = appManager.listRollbackSnapshots(req.appId);
@@ -458,7 +505,7 @@ export function createSystemAppRollbackGCService(
 	{ scanned: number; eligible: number; removed: number; remaining: number; dryRun: boolean }
 > {
 	return {
-		name: "system.app.rollback.gc",
+		name: TOKENS.SYSTEM_APP_ROLLBACK_GC,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			const snapshots = appManager.listRollbackSnapshots(req.appId);
@@ -503,7 +550,7 @@ export function createSystemDependenciesService(
 	kernel: LLMOSKernel,
 ): OSService<Record<string, never>, SystemDependenciesResponse> {
 	return {
-		name: "system.dependencies",
+		name: TOKENS.SYSTEM_DEPENDENCIES,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			graph: kernel.services.graph(),
@@ -531,7 +578,7 @@ export function createSystemMetricsService(
 	kernel: LLMOSKernel,
 ): OSService<SystemMetricsRequest, SystemMetricsResponse> {
 	return {
-		name: "system.metrics",
+		name: TOKENS.SYSTEM_METRICS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => ({
 			metrics: req.service ? [kernel.metrics.snapshot(req.service)] : kernel.metrics.allSnapshots(),
@@ -563,7 +610,7 @@ export interface SystemAuditResponse {
 
 export function createSystemAuditService(kernel: LLMOSKernel): OSService<SystemAuditRequest, SystemAuditResponse> {
 	return {
-		name: "system.audit",
+		name: TOKENS.SYSTEM_AUDIT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			let records = kernel.audit.list();
@@ -603,7 +650,7 @@ export function createSystemTopologyService(
 	kernel: LLMOSKernel,
 ): OSService<Record<string, never>, SystemTopologyResponse> {
 	return {
-		name: "system.topology",
+		name: TOKENS.SYSTEM_TOPOLOGY,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			services: kernel.services.list(),
@@ -627,7 +674,7 @@ export function createSystemCapabilitiesService(
 	kernel: LLMOSKernel,
 ): OSService<SystemCapabilitiesRequest, SystemCapabilitiesResponse> {
 	return {
-		name: "system.capabilities",
+		name: TOKENS.SYSTEM_CAPABILITIES,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => ({
 			appId: req.appId,
@@ -644,7 +691,7 @@ export function createSystemCapabilitiesListService(
 	kernel: LLMOSKernel,
 ): OSService<Record<string, never>, SystemCapabilitiesListResponse> {
 	return {
-		name: "system.capabilities.list",
+		name: TOKENS.SYSTEM_CAPABILITIES_LIST,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			capabilitiesByApp: kernel.capabilities.listAll(),
@@ -669,7 +716,7 @@ export function createSystemEventsService(
 	kernel: LLMOSKernel,
 ): OSService<SystemEventsRequest, SystemEventsResponse> {
 	return {
-		name: "system.events",
+		name: TOKENS.SYSTEM_EVENTS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => ({
 			events: kernel.events.list(req.topic, req.limit),
@@ -685,7 +732,7 @@ export function createSystemPolicyService(
 	kernel: LLMOSKernel,
 ): OSService<Record<string, never>, SystemPolicyResponse> {
 	return {
-		name: "system.policy",
+		name: TOKENS.SYSTEM_POLICY,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			policy: kernel.policy.getSnapshot(),
@@ -724,7 +771,7 @@ export function createSystemSnapshotService(
 	},
 ): OSService<Record<string, never>, SystemSnapshotResponse> {
 	return {
-		name: "system.snapshot",
+		name: TOKENS.SYSTEM_SNAPSHOT,
 		requiredPermissions: ["system:read"],
 		execute: async () => {
 			const services = kernel.services.list();
@@ -837,7 +884,7 @@ export function createSystemErrorsService(
 	kernel: LLMOSKernel,
 ): OSService<SystemErrorsRequest, SystemErrorsResponse> {
 	return {
-		name: "system.errors",
+		name: TOKENS.SYSTEM_ERRORS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			let records = kernel.audit.list().filter((record) => !record.success);
@@ -934,7 +981,7 @@ export function createSystemErrorsExportService(
 ): OSService<SystemErrorsExportRequest, SystemErrorsExportResponse> {
 	const base = createSystemErrorsService(kernel);
 	return {
-		name: "system.errors.export",
+		name: TOKENS.SYSTEM_ERRORS_EXPORT,
 		requiredPermissions: ["system:read"],
 		execute: async (req, ctx) => {
 			const { format = "json", ...filters } = req;
@@ -1014,7 +1061,7 @@ export function createSystemErrorsKeysRotateService(): OSService<
 	}
 > {
 	return {
-		name: "system.errors.keys.rotate",
+		name: TOKENS.SYSTEM_ERRORS_KEYS_ROTATE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			errorsSigningKeys.set(req.keyId, {
@@ -1041,7 +1088,7 @@ export function createSystemErrorsKeysListService(): OSService<
 	}
 > {
 	return {
-		name: "system.errors.keys.list",
+		name: TOKENS.SYSTEM_ERRORS_KEYS_LIST,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			activeKeyId: activeErrorsSigningKeyId,
@@ -1059,7 +1106,7 @@ export function createSystemErrorsKeysActivateService(): OSService<
 	{ activated: boolean; activeKeyId: string }
 > {
 	return {
-		name: "system.errors.keys.activate",
+		name: TOKENS.SYSTEM_ERRORS_KEYS_ACTIVATE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			if (errorsSigningKeys.has(req.keyId)) {
@@ -1088,7 +1135,7 @@ export function createSystemPolicyEvaluateService(
 	kernel: LLMOSKernel,
 ): OSService<SystemPolicyEvaluateRequest, SystemPolicyEvaluateResponse> {
 	return {
-		name: "system.policy.evaluate",
+		name: TOKENS.SYSTEM_POLICY_EVALUATE,
 		requiredPermissions: ["system:read"],
 		execute: async (req, ctx) => {
 			if (req.url) {
@@ -1124,7 +1171,7 @@ export function createSystemNetCircuitService(
 	netService: NetService,
 ): OSService<Record<string, never>, SystemNetCircuitResponse> {
 	return {
-		name: "system.net.circuit",
+		name: TOKENS.SYSTEM_NET_CIRCUIT,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			circuits: netService.getCircuitSnapshot(),
@@ -1144,7 +1191,7 @@ export function createSystemNetCircuitResetService(
 	netService: NetService,
 ): OSService<SystemNetCircuitResetRequest, SystemNetCircuitResetResponse> {
 	return {
-		name: "system.net.circuit.reset",
+		name: TOKENS.SYSTEM_NET_CIRCUIT_RESET,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => ({
 			cleared: netService.resetCircuits(req.host),
@@ -1165,7 +1212,7 @@ export function createSystemSchedulerFailuresService(
 	schedulerService: SchedulerService,
 ): OSService<SystemSchedulerFailuresRequest, SystemSchedulerFailuresResponse> {
 	return {
-		name: "system.scheduler.failures",
+		name: TOKENS.SYSTEM_SCHEDULER_FAILURES,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			let failures = schedulerService.listFailures(req.limit);
@@ -1195,7 +1242,7 @@ export function createSystemAlertsService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsRequest, SystemAlertsResponse> {
 	return {
-		name: "system.alerts",
+		name: TOKENS.SYSTEM_ALERTS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const alerts = notificationService.query({
@@ -1231,7 +1278,7 @@ export function createSystemAlertsClearService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsClearRequest, SystemAlertsClearResponse> {
 	return {
-		name: "system.alerts.clear",
+		name: TOKENS.SYSTEM_ALERTS_CLEAR,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => ({
 			cleared: notificationService.clear({
@@ -1261,7 +1308,7 @@ export function createSystemAlertsExportService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsExportRequest, SystemAlertsExportResponse> {
 	return {
-		name: "system.alerts.export",
+		name: TOKENS.SYSTEM_ALERTS_EXPORT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const alerts = notificationService.query({
@@ -1305,7 +1352,7 @@ export function createSystemAlertsStatsService(
 	notificationService: NotificationService,
 ): OSService<Record<string, never>, SystemAlertsStatsResponse> {
 	return {
-		name: "system.alerts.stats",
+		name: TOKENS.SYSTEM_ALERTS_STATS,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			stats: notificationService.getStats(),
@@ -1328,7 +1375,7 @@ export function createSystemAlertsTopicsService(
 	notificationService: NotificationService,
 ): OSService<Record<string, never>, SystemAlertsTopicsResponse> {
 	return {
-		name: "system.alerts.topics",
+		name: TOKENS.SYSTEM_ALERTS_TOPICS,
 		requiredPermissions: ["system:read"],
 		execute: async () => {
 			const byTopic = notificationService.getStats().byTopic;
@@ -1367,7 +1414,7 @@ export function createSystemAlertsUnackedService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsUnackedRequest, SystemAlertsUnackedResponse> {
 	return {
-		name: "system.alerts.unacked",
+		name: TOKENS.SYSTEM_ALERTS_UNACKED,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const alerts = notificationService.query({
@@ -1392,7 +1439,7 @@ export function createSystemAlertsPolicyService(
 	notificationService: NotificationService,
 ): OSService<Record<string, never>, SystemAlertsPolicyResponse> {
 	return {
-		name: "system.alerts.policy",
+		name: TOKENS.SYSTEM_ALERTS_POLICY,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			policy: notificationService.getPolicy(),
@@ -1415,7 +1462,7 @@ export function createSystemAlertsTrendsService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsTrendsRequest, SystemAlertsTrendsResponse> {
 	return {
-		name: "system.alerts.trends",
+		name: TOKENS.SYSTEM_ALERTS_TRENDS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes > 0 ? req.windowMinutes : 1;
@@ -1447,7 +1494,7 @@ export function createSystemAlertsSLOService(
 	notificationService: NotificationService,
 ): OSService<Record<string, never>, SystemAlertsSLOResponse> {
 	return {
-		name: "system.alerts.slo",
+		name: TOKENS.SYSTEM_ALERTS_SLO,
 		requiredPermissions: ["system:read"],
 		execute: async () => {
 			const acked = notificationService
@@ -1499,7 +1546,7 @@ export function createSystemAlertsIncidentsService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsIncidentsRequest, SystemAlertsIncidentsResponse> {
 	return {
-		name: "system.alerts.incidents",
+		name: TOKENS.SYSTEM_ALERTS_INCIDENTS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const alerts = notificationService.query({
@@ -1561,7 +1608,7 @@ export function createSystemAlertsDigestService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsDigestRequest, SystemAlertsDigestResponse> {
 	return {
-		name: "system.alerts.digest",
+		name: TOKENS.SYSTEM_ALERTS_DIGEST,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const alerts = notificationService.query({
@@ -1629,7 +1676,7 @@ export function createSystemAlertsReportService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsReportRequest, SystemAlertsReportResponse> {
 	return {
-		name: "system.alerts.report",
+		name: TOKENS.SYSTEM_ALERTS_REPORT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes && req.windowMinutes > 0 ? req.windowMinutes : 60;
@@ -1682,7 +1729,7 @@ export function createSystemAlertsReportCompactService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsReportRequest, SystemAlertsReportCompactResponse> {
 	return {
-		name: "system.alerts.report.compact",
+		name: TOKENS.SYSTEM_ALERTS_REPORT_COMPACT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const report = await createSystemAlertsReportService(notificationService).execute(
@@ -1725,7 +1772,7 @@ export function createSystemAlertsFlappingService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsFlappingRequest, SystemAlertsFlappingResponse> {
 	return {
-		name: "system.alerts.flapping",
+		name: TOKENS.SYSTEM_ALERTS_FLAPPING,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes > 0 ? req.windowMinutes : 5;
@@ -1791,7 +1838,7 @@ export function createSystemAlertsTimelineService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsTimelineRequest, SystemAlertsTimelineResponse> {
 	return {
-		name: "system.alerts.timeline",
+		name: TOKENS.SYSTEM_ALERTS_TIMELINE,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes > 0 ? req.windowMinutes : 60;
@@ -1858,7 +1905,7 @@ export function createSystemAlertsHotspotsService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsHotspotsRequest, SystemAlertsHotspotsResponse> {
 	return {
-		name: "system.alerts.hotspots",
+		name: TOKENS.SYSTEM_ALERTS_HOTSPOTS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes > 0 ? req.windowMinutes : 10;
@@ -1940,7 +1987,7 @@ export function createSystemAlertsRecommendationsService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsRecommendationsRequest, SystemAlertsRecommendationsResponse> {
 	return {
-		name: "system.alerts.recommendations",
+		name: TOKENS.SYSTEM_ALERTS_RECOMMENDATIONS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes > 0 ? req.windowMinutes : 10;
@@ -2049,7 +2096,7 @@ export function createSystemAlertsFeedService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsFeedRequest, SystemAlertsFeedResponse> {
 	return {
-		name: "system.alerts.feed",
+		name: TOKENS.SYSTEM_ALERTS_FEED,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const offset = req.offset && req.offset > 0 ? req.offset : 0;
@@ -2093,7 +2140,7 @@ export function createSystemAlertsBacklogService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsBacklogRequest, SystemAlertsBacklogResponse> {
 	return {
-		name: "system.alerts.backlog",
+		name: TOKENS.SYSTEM_ALERTS_BACKLOG,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const overdueThresholdMs = req.overdueThresholdMs && req.overdueThresholdMs > 0 ? req.overdueThresholdMs : 300000;
@@ -2161,7 +2208,7 @@ export function createSystemAlertsBreachesService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsBreachesRequest, SystemAlertsBreachesResponse> {
 	return {
-		name: "system.alerts.breaches",
+		name: TOKENS.SYSTEM_ALERTS_BREACHES,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes > 0 ? req.windowMinutes : 10;
@@ -2262,7 +2309,7 @@ export function createSystemAlertsHealthService(
 	notificationService: NotificationService,
 ): OSService<SystemAlertsHealthRequest, SystemAlertsHealthResponse> {
 	return {
-		name: "system.alerts.health",
+		name: TOKENS.SYSTEM_ALERTS_HEALTH,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const windowMinutes = req.windowMinutes && req.windowMinutes > 0 ? req.windowMinutes : 10;
@@ -2376,7 +2423,7 @@ export function createSystemAlertsAutoRemediatePlanService(
 	netService?: NetService,
 ): OSService<SystemAlertsAutoRemediatePlanRequest, SystemAlertsAutoRemediatePlanResponse> {
 	return {
-		name: "system.alerts.auto-remediate.plan",
+		name: TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_PLAN,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const topic = req.topic ?? "system.alert";
@@ -2494,7 +2541,7 @@ export function createSystemAlertsAutoRemediateExecuteService(
 	netService: NetService,
 ): OSService<SystemAlertsAutoRemediateExecuteRequest, SystemAlertsAutoRemediateExecuteResponse> {
 	return {
-		name: "system.alerts.auto-remediate.execute",
+		name: TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_EXECUTE,
 		requiredPermissions: ["system:write"],
 		execute: async (req, ctx) => {
 			const appendAudit = (record: Omit<SystemAlertsAutoRemediateAuditRecord, "id" | "timestamp">): void => {
@@ -2648,7 +2695,7 @@ export function createSystemAlertsAutoRemediateAuditService(): OSService<
 	}
 > {
 	return {
-		name: "system.alerts.auto-remediate.audit",
+		name: TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_AUDIT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			let records = [...autoRemediateAuditRecords];
@@ -2674,7 +2721,7 @@ export function createSystemPolicyUpdateService(
 	kernel: LLMOSKernel,
 ): OSService<SystemPolicyUpdateRequest, { policy: ReturnType<LLMOSKernel["policy"]["getSnapshot"]> }> {
 	return {
-		name: "system.policy.update",
+		name: TOKENS.SYSTEM_POLICY_UPDATE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			const policy = kernel.policy.updateRules(req.patch);
@@ -2690,7 +2737,7 @@ export function createSystemPolicyVersionCreateService(
 	kernel: LLMOSKernel,
 ): OSService<{ label?: string }, { versionId: string; createdAt: string; label?: string }> {
 	return {
-		name: "system.policy.version.create",
+		name: TOKENS.SYSTEM_POLICY_VERSION_CREATE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			const version = kernel.policy.createVersion(req.label);
@@ -2707,7 +2754,7 @@ export function createSystemPolicyVersionListService(
 	kernel: LLMOSKernel,
 ): OSService<Record<string, never>, { versions: ReturnType<LLMOSKernel["policy"]["listVersions"]> }> {
 	return {
-		name: "system.policy.version.list",
+		name: TOKENS.SYSTEM_POLICY_VERSION_LIST,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			versions: kernel.policy.listVersions(),
@@ -2719,7 +2766,7 @@ export function createSystemPolicyVersionRollbackService(
 	kernel: LLMOSKernel,
 ): OSService<{ versionId: string }, { rolledBack: boolean; policy: ReturnType<LLMOSKernel["policy"]["getSnapshot"]> }> {
 	return {
-		name: "system.policy.version.rollback",
+		name: TOKENS.SYSTEM_POLICY_VERSION_ROLLBACK,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => ({
 			rolledBack: kernel.policy.rollbackVersion(req.versionId),
@@ -2746,7 +2793,7 @@ export function createSystemPolicySimulateBatchService(
 	kernel: LLMOSKernel,
 ): OSService<SystemPolicySimulateBatchRequest, SystemPolicySimulateBatchResponse> {
 	return {
-		name: "system.policy.simulate.batch",
+		name: TOKENS.SYSTEM_POLICY_SIMULATE_BATCH,
 		requiredPermissions: ["system:read"],
 		execute: async (req, ctx) => {
 			const decisions = req.inputs.map((input) => kernel.policy.evaluate(input, ctx));
@@ -2791,7 +2838,7 @@ export function createSystemPolicyGuardApplyService(
 	kernel: LLMOSKernel,
 ): OSService<SystemPolicyGuardApplyRequest, SystemPolicyGuardApplyResponse> {
 	return {
-		name: "system.policy.guard.apply",
+		name: TOKENS.SYSTEM_POLICY_GUARD_APPLY,
 		requiredPermissions: ["system:write"],
 		execute: async (req, ctx) => {
 			let simulation: SystemPolicySimulateBatchResponse | undefined;
@@ -2887,7 +2934,7 @@ export function createSystemSLOService(
 	notificationService: NotificationService,
 ): OSService<SystemSLORequest, SystemSLOResponse> {
 	return {
-		name: "system.slo",
+		name: TOKENS.SYSTEM_SLO,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const serviceMetrics = kernel.metrics
@@ -2928,7 +2975,7 @@ export function createSystemSLOService(
 
 export function createSystemSLORulesUpsertService(): OSService<{ rule: SLOThresholdRule }, { rule: SLOThresholdRule }> {
 	return {
-		name: "system.slo.rules.upsert",
+		name: TOKENS.SYSTEM_SLO_RULES_UPSERT,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			sloRules.set(req.rule.id, req.rule);
@@ -2939,7 +2986,7 @@ export function createSystemSLORulesUpsertService(): OSService<{ rule: SLOThresh
 
 export function createSystemSLORulesListService(): OSService<Record<string, never>, { rules: SLOThresholdRule[] }> {
 	return {
-		name: "system.slo.rules.list",
+		name: TOKENS.SYSTEM_SLO_RULES_LIST,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			rules: [...sloRules.values()],
@@ -2963,7 +3010,7 @@ export function createSystemSLORulesEvaluateService(
 	}
 > {
 	return {
-		name: "system.slo.rules.evaluate",
+		name: TOKENS.SYSTEM_SLO_RULES_EVALUATE,
 		requiredPermissions: ["system:read"],
 		execute: async () => {
 			const slo = await createSystemSLOService(kernel, notificationService).execute(
@@ -3047,7 +3094,7 @@ export function createSystemAuditExportService(
 	securityService: SecurityService,
 ): OSService<SystemAuditExportRequest, SystemAuditExportResponse> {
 	return {
-		name: "system.audit.export",
+		name: TOKENS.SYSTEM_AUDIT_EXPORT,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			if (req.format && req.format !== "jsonl") {
@@ -3115,7 +3162,7 @@ export function createSystemAuditKeysRotateService(): OSService<
 	}
 > {
 	return {
-		name: "system.audit.keys.rotate",
+		name: TOKENS.SYSTEM_AUDIT_KEYS_ROTATE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			auditSigningKeys.set(req.keyId, {
@@ -3142,7 +3189,7 @@ export function createSystemAuditKeysListService(): OSService<
 	}
 > {
 	return {
-		name: "system.audit.keys.list",
+		name: TOKENS.SYSTEM_AUDIT_KEYS_LIST,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			activeKeyId: activeAuditSigningKeyId,
@@ -3160,7 +3207,7 @@ export function createSystemAuditKeysActivateService(): OSService<
 	{ activated: boolean; activeKeyId: string }
 > {
 	return {
-		name: "system.audit.keys.activate",
+		name: TOKENS.SYSTEM_AUDIT_KEYS_ACTIVATE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			if (auditSigningKeys.has(req.keyId)) {
@@ -3176,7 +3223,7 @@ export function createSystemQuotaService(
 	tenantGovernor: TenantQuotaGovernor,
 ): OSService<{ tenantId: string }, { tenantId: string; quota?: { maxToolCalls: number; maxTokens: number }; usage: { toolCalls: number; tokens: number } }> {
 	return {
-		name: "system.quota",
+		name: TOKENS.SYSTEM_QUOTA,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => ({
 			tenantId: req.tenantId,
@@ -3200,7 +3247,7 @@ export function createSystemQuotaAdjustService(
 	}
 > {
 	return {
-		name: "system.quota.adjust",
+		name: TOKENS.SYSTEM_QUOTA_ADJUST,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => ({
 			tenantId: req.tenantId,
@@ -3233,7 +3280,7 @@ export function createSystemQuotaPolicyUpsertService(): OSService<
 	{ policy: TenantQuotaPolicyRule }
 > {
 	return {
-		name: "system.quota.policy.upsert",
+		name: TOKENS.SYSTEM_QUOTA_POLICY_UPSERT,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			quotaPolicies.set(req.policy.id, req.policy);
@@ -3244,7 +3291,7 @@ export function createSystemQuotaPolicyUpsertService(): OSService<
 
 export function createSystemQuotaPolicyListService(): OSService<Record<string, never>, { policies: TenantQuotaPolicyRule[] }> {
 	return {
-		name: "system.quota.policy.list",
+		name: TOKENS.SYSTEM_QUOTA_POLICY_LIST,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			policies: [...quotaPolicies.values()],
@@ -3271,7 +3318,7 @@ export function createSystemQuotaPolicyApplyService(
 	}
 > {
 	return {
-		name: "system.quota.policy.apply",
+		name: TOKENS.SYSTEM_QUOTA_POLICY_APPLY,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			const hour = req.hour ?? new Date().getHours();
@@ -3311,7 +3358,7 @@ export function createSystemQuotaHotspotsService(
 	}
 > {
 	return {
-		name: "system.quota.hotspots",
+		name: TOKENS.SYSTEM_QUOTA_HOTSPOTS,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const thresholdToolCalls = req.thresholdToolCalls > 0 ? req.thresholdToolCalls : 10;
@@ -3346,7 +3393,7 @@ export function createSystemQuotaHotspotsIsolateService(
 	}
 > {
 	return {
-		name: "system.quota.hotspots.isolate",
+		name: TOKENS.SYSTEM_QUOTA_HOTSPOTS_ISOLATE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			const reductionFactor = req.reductionFactor && req.reductionFactor > 0 ? req.reductionFactor : 0.5;
@@ -3392,7 +3439,7 @@ export function createSystemChaosRunService(
 	schedulerService: SchedulerService,
 ): OSService<SystemChaosRunRequest, SystemChaosRunResponse> {
 	return {
-		name: "system.chaos.run",
+		name: TOKENS.SYSTEM_CHAOS_RUN,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			if (req.scenario === "policy_denied") {
@@ -3568,7 +3615,7 @@ export function createSystemChaosBaselineCaptureService(
 	}
 > {
 	return {
-		name: "system.chaos.baseline.capture",
+		name: TOKENS.SYSTEM_CHAOS_BASELINE_CAPTURE,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			const metrics = kernel.metrics.allSnapshots();
@@ -3615,7 +3662,7 @@ export function createSystemChaosBaselineVerifyService(
 	}
 > {
 	return {
-		name: "system.chaos.baseline.verify",
+		name: TOKENS.SYSTEM_CHAOS_BASELINE_VERIFY,
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const baseline = chaosBaselines.get(req.name);
@@ -3656,7 +3703,7 @@ export function createSystemGovernanceStateExportService(): OSService<
 	{ state: GovernanceStateSnapshot }
 > {
 	return {
-		name: "system.governance.state.export",
+		name: TOKENS.SYSTEM_GOVERNANCE_STATE_EXPORT,
 		requiredPermissions: ["system:read"],
 		execute: async () => ({
 			state: exportGovernanceState(),
@@ -3669,7 +3716,7 @@ export function createSystemGovernanceStateImportService(): OSService<
 	{ imported: true }
 > {
 	return {
-		name: "system.governance.state.import",
+		name: TOKENS.SYSTEM_GOVERNANCE_STATE_IMPORT,
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			importGovernanceState(req.state);
@@ -3685,7 +3732,7 @@ export function createSystemGovernanceStatePersistService(
 	key = "system.governance.state",
 ): OSService<Record<string, never>, { persisted: true }> {
 	return {
-		name: "system.governance.state.persist",
+		name: TOKENS.SYSTEM_GOVERNANCE_STATE_PERSIST,
 		requiredPermissions: ["system:write"],
 		execute: async () => {
 			store.set(key, exportGovernanceState() as unknown as Record<string, unknown>);
@@ -3701,7 +3748,7 @@ export function createSystemGovernanceStateRecoverService(
 	key = "system.governance.state",
 ): OSService<Record<string, never>, { recovered: boolean }> {
 	return {
-		name: "system.governance.state.recover",
+		name: TOKENS.SYSTEM_GOVERNANCE_STATE_RECOVER,
 		requiredPermissions: ["system:write"],
 		execute: async () => {
 			const raw = store.get(key);
@@ -3717,4 +3764,12 @@ export function createSystemGovernanceStateRecoverService(
 function thisEscapeCsv(value: string): string {
 	const escaped = value.replaceAll('"', '""');
 	return `"${escaped}"`;
+}
+
+function fingerprintState(value: unknown): { stateHash: string; stateSizeBytes: number } {
+	const json = JSON.stringify(value);
+	return {
+		stateHash: createHash("sha256").update(json, "utf8").digest("hex"),
+		stateSizeBytes: Buffer.byteLength(json, "utf8"),
+	};
 }

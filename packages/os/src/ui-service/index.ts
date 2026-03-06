@@ -1,3 +1,4 @@
+import { UI_RENDER } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
 export interface UINode {
@@ -30,7 +31,7 @@ export class UIService {
 
 export function createUIRenderService(service: UIService): OSService<UIRenderRequest, UIRenderResult> {
 	return {
-		name: "ui.render",
+		name: UI_RENDER,
 		requiredPermissions: ["ui:render"],
 		execute: async (req) => service.render(req),
 	};

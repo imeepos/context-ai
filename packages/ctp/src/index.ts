@@ -1,17 +1,16 @@
 // Core
-export * from './core/types';
-export * from './core/renderer';
-export * from './core/builder';
-export * from './core/router';
+export * from './core/types.js';
+export * from './core/renderer.js';
+export * from './core/builder.js';
+export * from './core/router.js';
 
 // Components
-export * from './components';
+export * from './components/index.js';
 
 // JSX
-export { jsx, jsxFragment, Fragment } from './jsx';
+export { jsx, jsxFragment, Fragment } from './jsx.js';
 
 // Re-export commonly used items
-export { render } from './core/renderer';
-export { buildPrompt } from './core/builder';
-export { router } from './core/router';
-
+export { render } from './core/renderer.js';
+export { buildPrompt } from './core/builder.js';
+export { router } from './core/router.js';

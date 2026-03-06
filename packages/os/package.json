@@ -17,7 +17,9 @@
     "start": "node dist/index.js",
     "test": "vitest run"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@context-ai/ctp": "*"
+  },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.3.0",

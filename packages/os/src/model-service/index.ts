@@ -1,4 +1,5 @@
 import { OSError } from "../kernel/errors.js";
+import { MODEL_GENERATE } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
 export interface ModelGenerateRequest {
@@ -37,7 +38,7 @@ export class ModelService {
 
 export function createModelGenerateService(modelService: ModelService): OSService<ModelGenerateRequest, ModelGenerateResponse> {
 	return {
-		name: "model.generate",
+		name: MODEL_GENERATE,
 		requiredPermissions: ["model:invoke"],
 		execute: async (req) => modelService.generate(req),
 	};

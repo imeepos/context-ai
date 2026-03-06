@@ -1,4 +1,4 @@
-import type { JSXElement } from '../core/types';
+import type { JSXElement } from '../core/types.js';
 export interface ExampleProps {
   title?: string;
   description?: string;

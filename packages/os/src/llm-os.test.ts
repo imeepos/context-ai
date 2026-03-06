@@ -1,14 +1,98 @@
 import { describe, expect, it } from "vitest";
 import { createDefaultLLMOS } from "./llm-os.js";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { vi } from "vitest";
+import * as TOKENS from "./tokens.js";
+
+async function writeMockPageModule(root: string): Promise<void> {
+	await writeFile(
+		join(root, "index.js"),
+		[
+			"export function createContext() {",
+			"  return {",
+			'    type: "Context",',
+			"    props: {",
+			'      name: "Mock Page",',
+			'      description: "mock",',
+			'      children: { type: "Text", props: { children: "mock page" } }',
+			"    }",
+			"  };",
+			"}",
+			"export default createContext;",
+			"",
+		].join("\n"),
+		{ encoding: "utf8" },
+	);
+}
 
 describe("createDefaultLLMOS", () => {
+	it("installs system task app by default and supports uninstall/install", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-system-task-"));
+		try {
+			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
+			const context = {
+				appId: "admin",
+				sessionId: "session-system-task",
+				permissions: ["app:manage", "app:read", "system:read"],
+				workingDirectory: root,
+			};
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "admin",
+						name: "Admin",
+						version: "1.0.0",
+						entry: "index.js",
+						permissions: context.permissions,
+					},
+				},
+				context,
+			);
+			const routesBefore = await os.kernel.execute(TOKENS.SYSTEM_ROUTES, { prefix: "system://", limit: 10 }, context);
+			expect(routesBefore.routes).toContain("system://task");
+
+			await os.kernel.execute(TOKENS.APP_UNINSTALL, { appId: "system" }, context);
+			const routesAfterUninstall = await os.kernel.execute(TOKENS.SYSTEM_ROUTES, { prefix: "system://", limit: 10 }, context);
+			expect(routesAfterUninstall.routes).not.toContain("system://task");
+
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "system",
+						name: "System Task Alt",
+						version: "2.0.0",
+						entry: {
+							pages: [
+								{
+									id: "task",
+									route: "system://task",
+									name: "Task",
+									description: "Replacement task app",
+									path: "index.js",
+									default: true,
+								},
+							],
+						},
+						permissions: ["app:read", "model:invoke", "app:manage", "system:read"],
+					},
+				},
+				context,
+			);
+			const routesAfterInstall = await os.kernel.execute(TOKENS.SYSTEM_ROUTES, { prefix: "system://", limit: 10 }, context);
+			expect(routesAfterInstall.routes).toContain("system://task");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("registers default services and executes store flow", async () => {
 		const root = await mkdtemp(join(tmpdir(), "os-kernel-"));
 		try {
+			await writeMockPageModule(root);
 			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
 			const context = {
 				appId: "app.default",
@@ -96,7 +180,7 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const v1Caps = await os.kernel.execute("system.capabilities", { appId: "app.v1" }, context);
+			const v1Caps = await os.kernel.execute(TOKENS.SYSTEM_CAPABILITIES, { appId: "app.v1" }, context);
 			expect(v1Caps.capabilities).toContain("app:read");
 
 			const notesInstall = await os.kernel.execute(
@@ -124,11 +208,14 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(rollbackEvents.notifications.length).toBeGreaterThan(0);
-			const capsAfterRollback = await os.kernel.execute("system.capabilities.list", {}, context);
+			const capsAfterRollback = await os.kernel.execute(TOKENS.SYSTEM_CAPABILITIES_LIST, {}, context);
 			expect(capsAfterRollback.capabilitiesByApp["app.notes"]).toBeUndefined();
-			const apps = await os.kernel.execute("app.list", { _: "list" }, context);
-			expect(apps.apps).toHaveLength(2);
-			const installEvents = await os.kernel.execute("notification.list", { topic: "system.app.install", limit: 10 }, context);
+			expect(capsAfterRollback.capabilitiesByApp.system).toContain("model:invoke");
+			const systemRoute = await os.kernel.execute(TOKENS.SYSTEM_ROUTES, { prefix: "system://", limit: 10 }, context);
+			expect(systemRoute.routes).toContain("system://task");
+			const apps = await os.kernel.execute(TOKENS.APP_LIST, { _: "list" }, context);
+			expect(apps.apps).toHaveLength(3);
+			const installEvents = await os.kernel.execute(TOKENS.NOTIFICATION_LIST, { topic: "system.app.install", limit: 10 }, context);
 			expect(installEvents.notifications.length).toBeGreaterThan(0);
 			const routes = await os.kernel.execute(
 				"system.routes",
@@ -136,18 +223,18 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(routes.total).toBeGreaterThan(0);
-			const routeStats = await os.kernel.execute("system.routes.stats", { appId: "app.default" }, context);
+			const routeStats = await os.kernel.execute(TOKENS.SYSTEM_ROUTES_STATS, { appId: "app.default" }, context);
 			expect(Array.isArray(routeStats.stats)).toBe(true);
-			const installReport = await os.kernel.execute("system.app.install.report", { appId: "app.v1" }, context);
+			const installReport = await os.kernel.execute(TOKENS.SYSTEM_APP_INSTALL_REPORT, { appId: "app.v1" }, context);
 			expect(installReport.rollbackToken).toContain("app.v1@1.0.0:");
-			const startedV1 = await os.kernel.execute("app.start", { appId: "app.v1" }, context);
+			const startedV1 = await os.kernel.execute(TOKENS.APP_START, { appId: "app.v1" }, context);
 			expect(startedV1.route).toBe("app.v1://main");
 
-			await os.kernel.execute("store.set", { key: "name", value: "ctp" }, context);
-			const result = await os.kernel.execute("store.get", { key: "name" }, context);
+			await os.kernel.execute(TOKENS.STORE_SET, { key: "name", value: "ctp" }, context);
+			const result = await os.kernel.execute(TOKENS.STORE_GET, { key: "name" }, context);
 			expect(result.value).toBe("ctp");
 
-			const model = await os.kernel.execute("model.generate", { model: "echo", prompt: "hi" }, context);
+			const model = await os.kernel.execute(TOKENS.MODEL_GENERATE, { model: "echo", prompt: "hi" }, context);
 			expect(model.output).toBe("echo:hi");
 			const task = await os.kernel.execute(
 				"task.submit",
@@ -211,7 +298,7 @@ describe("createDefaultLLMOS", () => {
 				{ package: { name: "demo", version: "1.0.0", source: "registry://demo" } },
 				context,
 			);
-			const packages = await os.kernel.execute("package.list", {}, context);
+			const packages = await os.kernel.execute(TOKENS.PACKAGE_LIST, {}, context);
 			expect(packages.packages).toHaveLength(1);
 
 			const ui = await os.kernel.execute(
@@ -225,52 +312,52 @@ describe("createDefaultLLMOS", () => {
 				name: "sensor",
 				handle: async () => ({ value: 42 }),
 			});
-			const host = await os.kernel.execute("host.execute", { adapter: "sensor", action: "read" }, context);
+			const host = await os.kernel.execute(TOKENS.HOST_EXECUTE, { adapter: "sensor", action: "read" }, context);
 			expect(host.result).toEqual({ value: 42 });
 
-			const media = await os.kernel.execute("media.inspect", { path: "a.jpg" }, context);
+			const media = await os.kernel.execute(TOKENS.MEDIA_INSPECT, { path: "a.jpg" }, context);
 			expect(media.kind).toBe("image");
 
-			const listed = await os.kernel.execute("file.list", { path: root }, context);
+			const listed = await os.kernel.execute(TOKENS.FILE_LIST, { path: root }, context);
 			expect(Array.isArray(listed.entries)).toBe(true);
 
 			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(new Response("ok", { status: 200 }));
-			await os.kernel.execute("net.request", { url: "https://example.com" }, context);
-			const journal = await os.kernel.execute("store.get", { key: "net.journal" }, context);
+			await os.kernel.execute(TOKENS.NET_REQUEST, { url: "https://example.com" }, context);
+			const journal = await os.kernel.execute(TOKENS.STORE_GET, { key: "net.journal" }, context);
 			expect(Array.isArray(journal.value)).toBe(true);
 
-			const health = await os.kernel.execute("system.health", {}, context);
+			const health = await os.kernel.execute(TOKENS.SYSTEM_HEALTH, {}, context);
 			expect(health.services.includes("system.health")).toBe(true);
 			expect(Array.isArray(health.metrics)).toBe(true);
-			const deps = await os.kernel.execute("system.dependencies", {}, context);
+			const deps = await os.kernel.execute(TOKENS.SYSTEM_DEPENDENCIES, {}, context);
 			expect(Object.keys(deps.graph).length).toBeGreaterThan(0);
-			const metricsAll = await os.kernel.execute("system.metrics", {}, context);
+			const metricsAll = await os.kernel.execute(TOKENS.SYSTEM_METRICS, {}, context);
 			expect(Array.isArray(metricsAll.metrics)).toBe(true);
-			const metricsOne = await os.kernel.execute("system.metrics", { service: "store.set" }, context);
+			const metricsOne = await os.kernel.execute(TOKENS.SYSTEM_METRICS, { service: "store.set" }, context);
 			expect(metricsOne.metrics).toHaveLength(1);
-			const auditAll = await os.kernel.execute("system.audit", { service: "store.set", limit: 5 }, context);
+			const auditAll = await os.kernel.execute(TOKENS.SYSTEM_AUDIT, { service: "store.set", limit: 5 }, context);
 			expect(auditAll.records.length).toBeGreaterThan(0);
-			const governanceState = await os.kernel.execute("system.governance.state.export", {}, context);
+			const governanceState = await os.kernel.execute(TOKENS.SYSTEM_GOVERNANCE_STATE_EXPORT, {}, context);
 			expect(typeof governanceState.state).toBe("object");
-			const auditSession = await os.kernel.execute("system.audit", { sessionId: context.sessionId }, context);
+			const auditSession = await os.kernel.execute(TOKENS.SYSTEM_AUDIT, { sessionId: context.sessionId }, context);
 			expect(auditSession.records.every((r) => r.sessionId === context.sessionId)).toBe(true);
-			const topology = await os.kernel.execute("system.topology", {}, context);
+			const topology = await os.kernel.execute(TOKENS.SYSTEM_TOPOLOGY, {}, context);
 			expect(topology.services.length).toBeGreaterThan(0);
 			expect(Object.keys(topology.dependencies).length).toBeGreaterThan(0);
 			expect(Array.isArray(topology.bootOrder)).toBe(true);
-			const events = await os.kernel.execute("system.events", { topic: "kernel.service.executed", limit: 3 }, context);
+			const events = await os.kernel.execute(TOKENS.SYSTEM_EVENTS, { topic: "kernel.service.executed", limit: 3 }, context);
 			expect(events.events.length).toBeGreaterThan(0);
-			const caps = await os.kernel.execute("system.capabilities", { appId: context.appId }, context);
+			const caps = await os.kernel.execute(TOKENS.SYSTEM_CAPABILITIES, { appId: context.appId }, context);
 			expect(caps.capabilities.includes("store:read")).toBe(true);
-			const capsAll = await os.kernel.execute("system.capabilities.list", {}, context);
+			const capsAll = await os.kernel.execute(TOKENS.SYSTEM_CAPABILITIES_LIST, {}, context);
 			expect(Object.keys(capsAll.capabilitiesByApp).length).toBeGreaterThan(0);
-			const policy = await os.kernel.execute("system.policy", {}, context);
+			const policy = await os.kernel.execute(TOKENS.SYSTEM_POLICY, {}, context);
 			expect(policy.policy.pathRule).toBeDefined();
-			const policyEval = await os.kernel.execute("system.policy.evaluate", { command: "echo ok" }, context);
+			const policyEval = await os.kernel.execute(TOKENS.SYSTEM_POLICY_EVALUATE, { command: "echo ok" }, context);
 			expect(policyEval.allowed).toBe(true);
-			const netCircuit = await os.kernel.execute("system.net.circuit", {}, context);
+			const netCircuit = await os.kernel.execute(TOKENS.SYSTEM_NET_CIRCUIT, {}, context);
 			expect(netCircuit.circuits).toBeDefined();
-			const netCircuitReset = await os.kernel.execute("system.net.circuit.reset", {}, context);
+			const netCircuitReset = await os.kernel.execute(TOKENS.SYSTEM_NET_CIRCUIT_RESET, {}, context);
 			expect(typeof netCircuitReset.cleared).toBe("number");
 			vi.useFakeTimers();
 			os.schedulerService.scheduleRetryable(
@@ -281,9 +368,9 @@ describe("createDefaultLLMOS", () => {
 				{ maxRetries: 0, backoffMs: 10 },
 			);
 			await vi.advanceTimersByTimeAsync(20);
-			const schedulerFailures = await os.kernel.execute("system.scheduler.failures", { limit: 10 }, context);
+			const schedulerFailures = await os.kernel.execute(TOKENS.SYSTEM_SCHEDULER_FAILURES, { limit: 10 }, context);
 			expect(schedulerFailures.failures.length).toBeGreaterThan(0);
-			const replayed = await os.kernel.execute("scheduler.failures.replay", { id: "job-dlq-int" }, context);
+			const replayed = await os.kernel.execute(TOKENS.SCHEDULER_FAILURES_REPLAY, { id: "job-dlq-int" }, context);
 			expect(replayed.replayed).toBe(true);
 			await vi.advanceTimersByTimeAsync(20);
 			const cleared = await os.kernel.execute(
@@ -293,11 +380,11 @@ describe("createDefaultLLMOS", () => {
 			);
 			expect(cleared.cleared).toBeGreaterThan(0);
 			vi.useRealTimers();
-			const snapshot = await os.kernel.execute("system.snapshot", {}, context);
+			const snapshot = await os.kernel.execute(TOKENS.SYSTEM_SNAPSHOT, {}, context);
 			expect(snapshot.health.services.length).toBeGreaterThan(0);
 			expect(snapshot.resilience.openNetCircuits).toBeGreaterThanOrEqual(0);
 			expect(snapshot.resilience.schedulerFailures).toBeGreaterThanOrEqual(0);
-			const errors = await os.kernel.execute("system.errors", {}, context);
+			const errors = await os.kernel.execute(TOKENS.SYSTEM_ERRORS, {}, context);
 			expect(typeof errors.totalFailures).toBe("number");
 
 			vi.useFakeTimers();
@@ -310,13 +397,13 @@ describe("createDefaultLLMOS", () => {
 				{ id: "job-once", delayMs: 10, topic: "demo.scheduled", payload: { ok: true } },
 				context,
 			);
-			const scheduled = await os.kernel.execute("scheduler.list", { _: "list" }, context);
+			const scheduled = await os.kernel.execute(TOKENS.SCHEDULER_LIST, { _: "list" }, context);
 			expect(scheduled.taskIds).toContain("job-once");
 			await vi.advanceTimersByTimeAsync(20);
 			expect(scheduledEventFired).toBe(true);
 			vi.useRealTimers();
 
-			await expect(os.kernel.execute("shell.execute", { command: "rm -rf /" }, context)).rejects.toThrow();
+			await expect(os.kernel.execute(TOKENS.SHELL_EXECUTE, { command: "rm -rf /" }, context)).rejects.toThrow();
 			const alerts = os.notificationService.list().filter((item) => item.topic === "system.alert");
 			expect(alerts.length).toBeGreaterThan(0);
 			const listedAlerts = await os.kernel.execute(
@@ -339,9 +426,9 @@ describe("createDefaultLLMOS", () => {
 				{ topic: "system.alert", message: "channel dispatch", severity: "warning" },
 				context,
 			);
-			const channelStats = await os.kernel.execute("notification.channel.stats", {}, context);
+			const channelStats = await os.kernel.execute(TOKENS.NOTIFICATION_CHANNEL_STATS, {}, context);
 			expect(typeof channelStats.channels.webhook?.success).toBe("number");
-			const alertsSummary = await os.kernel.execute("system.alerts", { topic: "system.alert", limit: 10 }, context);
+			const alertsSummary = await os.kernel.execute(TOKENS.SYSTEM_ALERTS, { topic: "system.alert", limit: 10 }, context);
 			expect(alertsSummary.total).toBeGreaterThan(0);
 			const alertsExport = await os.kernel.execute(
 				"system.alerts.export",
@@ -349,11 +436,11 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(alertsExport.contentType).toBe("application/json");
-			const alertsStats = await os.kernel.execute("system.alerts.stats", {}, context);
+			const alertsStats = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_STATS, {}, context);
 			expect(typeof alertsStats.stats.sent).toBe("number");
-			const alertsTopics = await os.kernel.execute("system.alerts.topics", {}, context);
+			const alertsTopics = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_TOPICS, {}, context);
 			expect(typeof alertsTopics.topics).toBe("object");
-			const alertsPolicy = await os.kernel.execute("system.alerts.policy", {}, context);
+			const alertsPolicy = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_POLICY, {}, context);
 			expect(typeof alertsPolicy.policy.dedupeWindowMs).toBe("number");
 			const updatedPolicy = await os.kernel.execute(
 				"notification.policy.update",
@@ -361,15 +448,15 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(updatedPolicy.policy.dedupeWindowMs).toBe(1234);
-			const alertsTrends = await os.kernel.execute("system.alerts.trends", { windowMinutes: 10 }, context);
+			const alertsTrends = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_TRENDS, { windowMinutes: 10 }, context);
 			expect(typeof alertsTrends.total).toBe("number");
-			const alertsSLO = await os.kernel.execute("system.alerts.slo", {}, context);
+			const alertsSLO = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_SLO, {}, context);
 			expect(typeof alertsSLO.avgAckLatencyMs).toBe("number");
-			const incidents = await os.kernel.execute("system.alerts.incidents", { topic: "system.alert" }, context);
+			const incidents = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_INCIDENTS, { topic: "system.alert" }, context);
 			expect(typeof incidents.totalIncidents).toBe("number");
-			const digest = await os.kernel.execute("system.alerts.digest", { topic: "system.alert" }, context);
+			const digest = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_DIGEST, { topic: "system.alert" }, context);
 			expect(typeof digest.digest).toBe("string");
-			const report = await os.kernel.execute("system.alerts.report", { topic: "system.alert" }, context);
+			const report = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_REPORT, { topic: "system.alert" }, context);
 			expect(typeof report.digest).toBe("string");
 			const compact = await os.kernel.execute(
 				"system.alerts.report.compact",
@@ -449,7 +536,7 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(Array.isArray(remediationAudit.records)).toBe(true);
-			const slo = await os.kernel.execute("system.slo", {}, context);
+			const slo = await os.kernel.execute(TOKENS.SYSTEM_SLO, {}, context);
 			expect(typeof slo.global.successRate).toBe("number");
 			await os.kernel.execute(
 				"system.slo.rules.upsert",
@@ -464,13 +551,13 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const sloRules = await os.kernel.execute("system.slo.rules.list", {}, context);
+			const sloRules = await os.kernel.execute(TOKENS.SYSTEM_SLO_RULES_LIST, {}, context);
 			expect(sloRules.rules.some((r: { id: string }) => r.id === "rule-demo")).toBe(true);
-			const sloBreaches = await os.kernel.execute("system.slo.rules.evaluate", {}, context);
+			const sloBreaches = await os.kernel.execute(TOKENS.SYSTEM_SLO_RULES_EVALUATE, {}, context);
 			expect(Array.isArray(sloBreaches.breaches)).toBe(true);
-			const policyVersion = await os.kernel.execute("system.policy.version.create", { label: "test" }, context);
+			const policyVersion = await os.kernel.execute(TOKENS.SYSTEM_POLICY_VERSION_CREATE, { label: "test" }, context);
 			expect(typeof policyVersion.versionId).toBe("string");
-			const policyVersions = await os.kernel.execute("system.policy.version.list", {}, context);
+			const policyVersions = await os.kernel.execute(TOKENS.SYSTEM_POLICY_VERSION_LIST, {}, context);
 			expect(policyVersions.versions.length).toBeGreaterThan(0);
 			const policyBatch = await os.kernel.execute(
 				"system.policy.simulate.batch",
@@ -511,7 +598,7 @@ describe("createDefaultLLMOS", () => {
 				{ keyId: "k-demo", secret: "secret-demo", setActive: true },
 				context,
 			);
-			const auditKeys = await os.kernel.execute("system.audit.keys.list", {}, context);
+			const auditKeys = await os.kernel.execute(TOKENS.SYSTEM_AUDIT_KEYS_LIST, {}, context);
 			expect(auditKeys.activeKeyId).toBe("k-demo");
 			os.tenantQuotaGovernor.setQuota("tenant-a", { maxToolCalls: 100, maxTokens: 10000 });
 			const quotaNow = await os.kernel.execute(
@@ -539,7 +626,7 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const quotaPolicyList = await os.kernel.execute("system.quota.policy.list", {}, context);
+			const quotaPolicyList = await os.kernel.execute(TOKENS.SYSTEM_QUOTA_POLICY_LIST, {}, context);
 			expect(quotaPolicyList.policies.some((p: { id: string }) => p.id === "tenant-a-peak")).toBe(true);
 			const quotaPolicyApply = await os.kernel.execute(
 				"system.quota.policy.apply",
@@ -554,7 +641,7 @@ describe("createDefaultLLMOS", () => {
 			expect(typeof quotaPolicyApply.matchedPolicyId === "string" || quotaPolicyApply.matchedPolicyId === undefined).toBe(
 				true,
 			);
-			const quotaHotspots = await os.kernel.execute("system.quota.hotspots", { thresholdToolCalls: 1 }, context);
+			const quotaHotspots = await os.kernel.execute(TOKENS.SYSTEM_QUOTA_HOTSPOTS, { thresholdToolCalls: 1 }, context);
 			expect(Array.isArray(quotaHotspots.hotspots)).toBe(true);
 			const chaos = await os.kernel.execute(
 				"system.chaos.run",
@@ -568,24 +655,24 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(typeof chaosReplay.passed).toBe("boolean");
-			await os.kernel.execute("system.chaos.baseline.capture", { name: "default" }, context);
+			await os.kernel.execute(TOKENS.SYSTEM_CHAOS_BASELINE_CAPTURE, { name: "default" }, context);
 			const baseline = await os.kernel.execute(
 				"system.chaos.baseline.verify",
 				{ name: "default", maxErrorRateDelta: 1, maxFailureDelta: 100 },
 				context,
 			);
 			expect(typeof baseline.passed).toBe("boolean");
-			const governancePersist = await os.kernel.execute("system.governance.state.persist", {}, context);
+			const governancePersist = await os.kernel.execute(TOKENS.SYSTEM_GOVERNANCE_STATE_PERSIST, {}, context);
 			expect(governancePersist.persisted).toBe(true);
-			const governanceRecover = await os.kernel.execute("system.governance.state.recover", {}, context);
+			const governanceRecover = await os.kernel.execute(TOKENS.SYSTEM_GOVERNANCE_STATE_RECOVER, {}, context);
 			expect(typeof governanceRecover.recovered).toBe("boolean");
-			const schedulerState = await os.kernel.execute("scheduler.state.export", {}, context);
+			const schedulerState = await os.kernel.execute(TOKENS.SCHEDULER_STATE_EXPORT, {}, context);
 			expect(Array.isArray(schedulerState.tasks)).toBe(true);
-			const schedulerPersist = await os.kernel.execute("scheduler.state.persist", {}, context);
+			const schedulerPersist = await os.kernel.execute(TOKENS.SCHEDULER_STATE_PERSIST, {}, context);
 			expect(typeof schedulerPersist.persisted).toBe("boolean");
-			const schedulerRecover = await os.kernel.execute("scheduler.state.recover", {}, context);
+			const schedulerRecover = await os.kernel.execute(TOKENS.SCHEDULER_STATE_RECOVER, {}, context);
 			expect(typeof schedulerRecover.recovered).toBe("boolean");
-			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
+			const alertsList = await os.kernel.execute(TOKENS.NOTIFICATION_LIST, { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(
 					"notification.ack",
@@ -600,9 +687,9 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(typeof ackAll.acknowledged).toBe("number");
-			const cleanup = await os.kernel.execute("notification.cleanup", {}, context);
+			const cleanup = await os.kernel.execute(TOKENS.NOTIFICATION_CLEANUP, {}, context);
 			expect(typeof cleanup.notifications).toBe("number");
-			const unacked = await os.kernel.execute("system.alerts.unacked", { topic: "system.alert" }, context);
+			const unacked = await os.kernel.execute(TOKENS.SYSTEM_ALERTS_UNACKED, { topic: "system.alert" }, context);
 			expect(typeof unacked.total).toBe("number");
 			const clearedAlerts = await os.kernel.execute(
 				"system.alerts.clear",
@@ -610,8 +697,8 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(typeof clearedAlerts.cleared).toBe("number");
-			await os.kernel.execute("notification.mute", { topic: "system.alert", durationMs: 1000 }, context);
-			const muteList = await os.kernel.execute("notification.mute.list", {}, context);
+			await os.kernel.execute(TOKENS.NOTIFICATION_MUTE, { topic: "system.alert", durationMs: 1000 }, context);
+			const muteList = await os.kernel.execute(TOKENS.NOTIFICATION_MUTE_LIST, {}, context);
 			expect(muteList.mutes.length).toBeGreaterThan(0);
 			const muted = await os.kernel.execute(
 				"notification.send",
@@ -619,13 +706,13 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(muted.sent).toBe(false);
-			await os.kernel.execute("notification.unmute", { topic: "system.alert" }, context);
+			await os.kernel.execute(TOKENS.NOTIFICATION_UNMUTE, { topic: "system.alert" }, context);
 
-			await os.kernel.execute("shell.env.set", { key: "AA", value: "BB" }, context);
-			const env = await os.kernel.execute("shell.env.list", { _: "list" }, context);
+			await os.kernel.execute(TOKENS.SHELL_ENV_SET, { key: "AA", value: "BB" }, context);
+			const env = await os.kernel.execute(TOKENS.SHELL_ENV_LIST, { _: "list" }, context);
 			expect(env.env.AA).toBe("BB");
-			await os.kernel.execute("shell.env.unset", { key: "AA" }, context);
-			const env2 = await os.kernel.execute("shell.env.list", { _: "list" }, context);
+			await os.kernel.execute(TOKENS.SHELL_ENV_UNSET, { key: "AA" }, context);
+			const env2 = await os.kernel.execute(TOKENS.SHELL_ENV_LIST, { _: "list" }, context);
 			expect(env2.env.AA).toBeUndefined();
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -658,8 +745,8 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 
-			await os.kernel.execute("store.set", { key: "a", value: "1" }, context);
-			await expect(os.kernel.execute("store.set", { key: "b", value: "2" }, context)).rejects.toThrow(
+			await os.kernel.execute(TOKENS.STORE_SET, { key: "a", value: "1" }, context);
+			await expect(os.kernel.execute(TOKENS.STORE_SET, { key: "b", value: "2" }, context)).rejects.toThrow(
 				"Tenant quota exceeded",
 			);
 		} finally {
@@ -738,7 +825,7 @@ describe("createDefaultLLMOS", () => {
 				permissions: ["store:write"],
 				workingDirectory: root,
 			};
-			await expect(os.kernel.execute("store.set", { key: "x", value: "1" }, context)).rejects.toMatchObject({
+			await expect(os.kernel.execute(TOKENS.STORE_SET, { key: "x", value: "1" }, context)).rejects.toMatchObject({
 				code: "E_APP_NOT_REGISTERED",
 			});
 		} finally {
@@ -769,12 +856,12 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			await os.kernel.execute("app.disable", { appId: context.appId }, context);
-			await expect(os.kernel.execute("store.set", { key: "x", value: "1" }, context)).rejects.toMatchObject({
+			await os.kernel.execute(TOKENS.APP_DISABLE, { appId: context.appId }, context);
+			await expect(os.kernel.execute(TOKENS.STORE_SET, { key: "x", value: "1" }, context)).rejects.toMatchObject({
 				code: "E_APP_NOT_REGISTERED",
 			});
-			await os.kernel.execute("app.enable", { appId: context.appId }, context);
-			await expect(os.kernel.execute("store.set", { key: "x", value: "1" }, context)).resolves.toEqual({ ok: true });
+			await os.kernel.execute(TOKENS.APP_ENABLE, { appId: context.appId }, context);
+			await expect(os.kernel.execute(TOKENS.STORE_SET, { key: "x", value: "1" }, context)).resolves.toEqual({ ok: true });
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -809,7 +896,7 @@ describe("createDefaultLLMOS", () => {
 				permissions: ["store:write"],
 				workingDirectory: root,
 			};
-			await expect(os.kernel.execute("store.set", { key: "x", value: "1" }, badContext)).rejects.toMatchObject({
+			await expect(os.kernel.execute(TOKENS.STORE_SET, { key: "x", value: "1" }, badContext)).rejects.toMatchObject({
 				code: "E_APP_PERMISSION_MISMATCH",
 			});
 		} finally {
@@ -853,7 +940,7 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const caps = await os.kernel.execute("system.capabilities", { appId: "app.up" }, context);
+			const caps = await os.kernel.execute(TOKENS.SYSTEM_CAPABILITIES, { appId: "app.up" }, context);
 			expect(caps.capabilities).toContain("store:write");
 		} finally {
 			await rm(root, { recursive: true, force: true });
@@ -915,7 +1002,7 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const caps = await os.kernel.execute("system.capabilities", { appId: "app.up" }, context);
+			const caps = await os.kernel.execute(TOKENS.SYSTEM_CAPABILITIES, { appId: "app.up" }, context);
 			expect(caps.capabilities).toContain("store:read");
 			expect(caps.capabilities).not.toContain("store:write");
 		} finally {
@@ -970,7 +1057,7 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			await os.kernel.execute("system.app.rollback.state.persist", {}, context);
+			await os.kernel.execute(TOKENS.SYSTEM_APP_ROLLBACK_STATE_PERSIST, {}, context);
 
 			await os.kernel.execute(
 				"system.app.rollback.state.import",
@@ -982,8 +1069,10 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const recoveredState = await os.kernel.execute("system.app.rollback.state.recover", {}, context);
+			const recoveredState = await os.kernel.execute(TOKENS.SYSTEM_APP_ROLLBACK_STATE_RECOVER, {}, context);
 			expect(recoveredState.recovered).toBe(true);
+			expect(typeof recoveredState.stateHash).toBe("string");
+			expect(typeof recoveredState.stateSizeBytes).toBe("number");
 			const rolled = await os.kernel.execute(
 				"app.install.rollback",
 				{
@@ -1039,10 +1128,12 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const recoveredState = await os.kernel.execute("system.app.rollback.state.recover", {}, context);
+			const recoveredState = await os.kernel.execute(TOKENS.SYSTEM_APP_ROLLBACK_STATE_RECOVER, {}, context);
 			expect(recoveredState.recovered).toBe(false);
 			expect(recoveredState.reason).toBe("invalid_state");
 			expect(recoveredState.errorCode).toBe("E_VALIDATION_FAILED");
+			expect(typeof recoveredState.stateHash).toBe("string");
+			expect(recoveredState.stateSizeBytes).toBeGreaterThan(0);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}
@@ -1106,7 +1197,7 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const dryRun = await os.kernel.execute("system.app.rollback.gc", { dryRun: true, limit: 1 }, context);
+			const dryRun = await os.kernel.execute(TOKENS.SYSTEM_APP_ROLLBACK_GC, { dryRun: true, limit: 1 }, context);
 			expect(dryRun.dryRun).toBe(true);
 			expect(dryRun.eligible).toBeGreaterThanOrEqual(0);
 			const stats = await os.kernel.execute(
@@ -1150,10 +1241,10 @@ describe("createDefaultLLMOS", () => {
 				.mockResolvedValueOnce(new Response("ok-1", { status: 200 }))
 				.mockResolvedValueOnce(new Response("ok-2", { status: 200 }))
 				.mockResolvedValueOnce(new Response("ok-3", { status: 200 }));
-			await os.kernel.execute("net.request", { url: "https://example.com/a" }, context);
-			await os.kernel.execute("net.request", { url: "https://example.com/b" }, context);
-			await os.kernel.execute("net.request", { url: "https://example.com/c" }, context);
-			const journal = await os.kernel.execute("store.get", { key: "net.journal" }, context);
+			await os.kernel.execute(TOKENS.NET_REQUEST, { url: "https://example.com/a" }, context);
+			await os.kernel.execute(TOKENS.NET_REQUEST, { url: "https://example.com/b" }, context);
+			await os.kernel.execute(TOKENS.NET_REQUEST, { url: "https://example.com/c" }, context);
+			const journal = await os.kernel.execute(TOKENS.STORE_GET, { key: "net.journal" }, context);
 			expect(Array.isArray(journal.value)).toBe(true);
 			expect(journal.value).toHaveLength(2);
 		} finally {
@@ -1216,6 +1307,7 @@ describe("createDefaultLLMOS", () => {
 	it("runs text task orchestration e2e (render + planner + runner)", async () => {
 		const root = await mkdtemp(join(tmpdir(), "os-e2e-"));
 		try {
+			await writeMockPageModule(root);
 			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
 			const context = {
 				appId: "todo",
@@ -1247,11 +1339,11 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
-			const rendered = await os.kernel.execute("app.page.render", { route: "todo://list" }, context);
+			const rendered = await os.kernel.execute(TOKENS.APP_PAGE_RENDER, { route: "todo://list" }, context);
 			expect(typeof rendered.prompt).toBe("string");
-			const renderedQuick = await os.kernel.execute("render", { route: "todo://list" }, context);
+			const renderedQuick = await os.kernel.execute(TOKENS.RENDER, { route: "todo://list" }, context);
 			expect(renderedQuick.page.route).toBe("todo://list");
-			const started = await os.kernel.execute("app.start", { appId: "todo" }, context);
+			const started = await os.kernel.execute(TOKENS.APP_START, { appId: "todo" }, context);
 			expect(started.route).toBe("todo://list");
 			const selected = await os.kernel.execute(
 				"planner.selectApps",
@@ -1259,7 +1351,7 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(selected.selected[0]?.appId).toBe("todo");
-			const composed = await os.kernel.execute("planner.composeTools", { routes: ["todo://list"] }, context);
+			const composed = await os.kernel.execute(TOKENS.PLANNER_COMPOSE_TOOLS, { routes: ["todo://list"] }, context);
 			expect(composed.composed.length).toBe(1);
 			const executed = await os.kernel.execute(
 				"runner.executePlan",

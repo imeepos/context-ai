@@ -1,5 +1,6 @@
 import { OSError } from "../kernel/errors.js";
 import type { PolicyEngine } from "../kernel/policy-engine.js";
+import { NET_REQUEST, SECURITY_REDACT, STORE_SET } from "../tokens.js";
 import type { OSContext, OSService } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 
@@ -223,9 +224,9 @@ export class NetService {
 
 export function createNetRequestService(netService: NetService): OSService<NetRequest, NetResponse> {
 	return {
-		name: "net.request",
+		name: NET_REQUEST,
 		requiredPermissions: ["net:request"],
-		dependencies: ["security.redact", "store.set"],
+		dependencies: [SECURITY_REDACT, STORE_SET],
 		execute: async (req, ctx) => netService.request(req, ctx),
 	};
 }

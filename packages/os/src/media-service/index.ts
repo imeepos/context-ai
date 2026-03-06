@@ -1,4 +1,5 @@
 import { extname } from "node:path";
+import { MEDIA_INSPECT } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
 export interface MediaInspectRequest {
@@ -58,7 +59,7 @@ export class MediaService {
 
 export function createMediaInspectService(service: MediaService): OSService<MediaInspectRequest, MediaInspectResult> {
 	return {
-		name: "media.inspect",
+		name: MEDIA_INSPECT,
 		requiredPermissions: ["media:read"],
 		execute: async (req) => service.inspect(req.path),
 	};

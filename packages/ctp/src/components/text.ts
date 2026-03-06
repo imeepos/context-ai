@@ -1,4 +1,4 @@
-import type { JSXElement } from '../core/types';
+import type { JSXElement } from '../core/types.js';
 export interface TextProps {
   children?: string | number | boolean | null;
   variant?: 'default' | 'heading' | 'subheading' | 'code' | 'quote' | 'emphasis';

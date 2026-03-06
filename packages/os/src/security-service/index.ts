@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { SECURITY_REDACT } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
 export class SecurityService {
@@ -30,7 +31,7 @@ export interface RedactRequest {
 
 export function createSecurityRedactService(securityService: SecurityService): OSService<RedactRequest, { output: string }> {
 	return {
-		name: "security.redact",
+		name: SECURITY_REDACT,
 		requiredPermissions: ["security:read"],
 		execute: async (req) => ({ output: securityService.redactSecrets(req.input) }),
 	};

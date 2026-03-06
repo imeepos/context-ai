@@ -448,7 +448,7 @@ describe("SystemService", () => {
 		expect(typeof sensitive.state.snapshots[0]?.token).toBe("string");
 		const importedManager = new AppManager();
 		const importService = createSystemAppRollbackStateImportService(importedManager);
-		await importService.execute(
+		const imported = await importService.execute(
 			{ state: manager.exportRollbackState() },
 			{
 				appId: "app.demo",
@@ -457,6 +457,11 @@ describe("SystemService", () => {
 				workingDirectory: process.cwd(),
 			},
 		);
+		expect(imported.imported).toBe(true);
+		expect(imported.snapshots).toBeGreaterThan(0);
+		expect(imported.installReports).toBeGreaterThan(0);
+		expect(typeof imported.stateHash).toBe("string");
+		expect(imported.stateSizeBytes).toBeGreaterThan(0);
 		expect(importedManager.getInstallReport("todo")?.version).toBe("1.0.0");
 
 		let persisted: unknown;
@@ -488,6 +493,10 @@ describe("SystemService", () => {
 			},
 		);
 		expect(recovered.recovered).toBe(true);
+		expect(recovered.snapshots).toBeGreaterThan(0);
+		expect(recovered.installReports).toBeGreaterThan(0);
+		expect(typeof recovered.stateHash).toBe("string");
+		expect(recovered.stateSizeBytes).toBeGreaterThan(0);
 		expect(recoverManager.getInstallReport("todo")?.version).toBe("1.0.0");
 
 		const seededInstall = createAppInstallService(recoverManager);
@@ -533,6 +542,8 @@ describe("SystemService", () => {
 		expect(invalidRecovered.recovered).toBe(false);
 		expect(invalidRecovered.reason).toBe("invalid_state");
 		expect(invalidRecovered.errorCode).toBe("E_VALIDATION_FAILED");
+		expect(typeof invalidRecovered.stateHash).toBe("string");
+		expect(invalidRecovered.stateSizeBytes).toBeGreaterThan(0);
 		expect(recoverManager.getInstallReport("seeded")?.version).toBe("1.0.0");
 	});
 

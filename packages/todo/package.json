@@ -6,10 +6,12 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
-    "start": "node dist/index.js"
+    "build": "npx tsc -b ../os/tsconfig.json --force && tsc && node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.copyFileSync('manifest.xml','dist/manifest.xml');\"",
+    "start": "node dist/index.js",
+    "install:app": "node dist/installTodoApp.js"
   },
   "dependencies": {
+    "@context-ai/os": "*",
     "@context-ai/ctp": "*",
     "@context-ai/agent": "*",
     "@mariozechner/pi-agent-core": "^0.56.0",

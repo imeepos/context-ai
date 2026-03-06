@@ -1,4 +1,4 @@
-import type { RenderedContext } from './types';
+import type { RenderedContext } from './types.js';
 
 /**
  * Builds a formatted prompt string from a RenderedContext.

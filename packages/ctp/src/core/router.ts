@@ -1,4 +1,4 @@
-import type { JSXElement, RouteHandler } from './types';
+import type { JSXElement, RouteHandler } from './types.js';
 
 export class Router {
   private routes: Map<string, RouteHandler> = new Map();

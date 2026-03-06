@@ -1,4 +1,5 @@
 import { OSError } from "../kernel/errors.js";
+import { HOST_EXECUTE } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
 export interface HostAdapterRequest {
@@ -28,7 +29,7 @@ export class HostAdapterRegistry {
 
 export function createHostAdapterExecuteService(registry: HostAdapterRegistry): OSService<HostAdapterRequest, { result: unknown }> {
 	return {
-		name: "host.execute",
+		name: HOST_EXECUTE,
 		requiredPermissions: ["host:invoke"],
 		execute: async (req) => ({ result: await registry.execute(req) }),
 	};

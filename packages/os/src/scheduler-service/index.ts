@@ -1,4 +1,16 @@
 import { OSError } from "../kernel/errors.js";
+import {
+	SCHEDULER_CANCEL,
+	SCHEDULER_FAILURES_CLEAR,
+	SCHEDULER_FAILURES_REPLAY,
+	SCHEDULER_LIST,
+	SCHEDULER_SCHEDULE_INTERVAL,
+	SCHEDULER_SCHEDULE_ONCE,
+	SCHEDULER_STATE_EXPORT,
+	SCHEDULER_STATE_IMPORT,
+	SCHEDULER_STATE_PERSIST,
+	SCHEDULER_STATE_RECOVER,
+} from "../tokens.js";
 import type { OSService } from "../types/os.js";
 import type { EventBus } from "../kernel/event-bus.js";
 
@@ -394,7 +406,7 @@ export interface ReplaySchedulerFailureRequest {
 
 export function createSchedulerCancelService(scheduler: SchedulerService): OSService<CancelTaskRequest, { cancelled: boolean }> {
 	return {
-		name: "scheduler.cancel",
+		name: SCHEDULER_CANCEL,
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => ({ cancelled: scheduler.cancel(req.id) }),
 	};
@@ -404,7 +416,7 @@ export function createSchedulerListService(
 	scheduler: SchedulerService,
 ): OSService<ListTasksRequest, { taskIds: string[] }> {
 	return {
-		name: "scheduler.list",
+		name: SCHEDULER_LIST,
 		requiredPermissions: ["scheduler:read"],
 		execute: async () => ({ taskIds: scheduler.list() }),
 	};
@@ -414,7 +426,7 @@ export function createSchedulerScheduleOnceService(
 	scheduler: SchedulerService,
 ): OSService<ScheduleOnceRequest, { scheduled: true }> {
 	return {
-		name: "scheduler.scheduleOnce",
+		name: SCHEDULER_SCHEDULE_ONCE,
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => {
 			scheduler.scheduleEventOnce(req.id, req.delayMs, req.topic, req.payload);
@@ -427,7 +439,7 @@ export function createSchedulerScheduleIntervalService(
 	scheduler: SchedulerService,
 ): OSService<ScheduleIntervalRequest, { scheduled: true }> {
 	return {
-		name: "scheduler.scheduleInterval",
+		name: SCHEDULER_SCHEDULE_INTERVAL,
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => {
 			scheduler.scheduleEventInterval(req.id, req.intervalMs, req.topic, req.payload, {
@@ -442,7 +454,7 @@ export function createSchedulerStateExportService(
 	scheduler: SchedulerService,
 ): OSService<Record<string, never>, ReturnType<SchedulerService["exportState"]>> {
 	return {
-		name: "scheduler.state.export",
+		name: SCHEDULER_STATE_EXPORT,
 		requiredPermissions: ["scheduler:read"],
 		execute: async () => scheduler.exportState(),
 	};
@@ -461,7 +473,7 @@ export function createSchedulerStateImportService(
 	}
 > {
 	return {
-		name: "scheduler.state.import",
+		name: SCHEDULER_STATE_IMPORT,
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => scheduler.restoreState(req),
 	};
@@ -471,7 +483,7 @@ export function createSchedulerStatePersistService(
 	scheduler: SchedulerService,
 ): OSService<Record<string, never>, { persisted: boolean; tasks: number; failures: number }> {
 	return {
-		name: "scheduler.state.persist",
+		name: SCHEDULER_STATE_PERSIST,
 		requiredPermissions: ["scheduler:write"],
 		execute: async () => scheduler.persistState(),
 	};
@@ -481,7 +493,7 @@ export function createSchedulerStateRecoverService(
 	scheduler: SchedulerService,
 ): OSService<Record<string, never>, { recovered: boolean; restoredTasks: number; restoredFailures: number }> {
 	return {
-		name: "scheduler.state.recover",
+		name: SCHEDULER_STATE_RECOVER,
 		requiredPermissions: ["scheduler:write"],
 		execute: async () => scheduler.recoverState(),
 	};
@@ -491,7 +503,7 @@ export function createSchedulerFailuresClearService(
 	scheduler: SchedulerService,
 ): OSService<ClearSchedulerFailuresRequest, { cleared: number }> {
 	return {
-		name: "scheduler.failures.clear",
+		name: SCHEDULER_FAILURES_CLEAR,
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => ({
 			cleared: scheduler.clearFailures(req.id),
@@ -503,7 +515,7 @@ export function createSchedulerFailuresReplayService(
 	scheduler: SchedulerService,
 ): OSService<ReplaySchedulerFailureRequest, { replayed: boolean }> {
 	return {
-		name: "scheduler.failures.replay",
+		name: SCHEDULER_FAILURES_REPLAY,
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => ({
 			replayed: scheduler.replayFailure(req.id),

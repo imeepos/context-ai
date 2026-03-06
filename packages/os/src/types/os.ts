@@ -7,10 +7,29 @@ export interface OSContext {
 	tenantId?: string;
 }
 
-export interface OSService<Request, Response> {
-	name: string;
+export type Token<Request, Response, Name extends string = string> = Name & {
+	readonly __request?: Request;
+	readonly __response?: Response;
+};
+
+export type RequestOfToken<T extends Token<unknown, unknown>> = T extends Token<infer Request, unknown, string>
+	? Request
+	: never;
+export type ResponseOfToken<T extends Token<unknown, unknown>> = T extends Token<unknown, infer Response, string>
+	? Response
+	: never;
+
+export type ServiceRequest<T extends OSService<unknown, unknown, string>> = T extends OSService<infer Request, unknown, string>
+	? Request
+	: never;
+export type ServiceResponse<T extends OSService<unknown, unknown, string>> = T extends OSService<unknown, infer Response, string>
+	? Response
+	: never;
+
+export interface OSService<Request, Response, Name extends string = string> {
+	name: Token<Request, Response, Name>;
 	requiredPermissions?: string[];
-	dependencies?: string[];
+	dependencies?: Array<Token<unknown, unknown>>;
 	execute(req: Request, ctx: OSContext): Promise<Response>;
 }
 

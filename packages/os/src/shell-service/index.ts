@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import type { PolicyEngine } from "../kernel/policy-engine.js";
+import { SHELL_ENV_LIST, SHELL_ENV_SET, SHELL_ENV_UNSET, SHELL_EXECUTE } from "../tokens.js";
 import type { OSContext, OSService } from "../types/os.js";
 import { ShellAuditLog } from "./audit.js";
 import { ShellPolicyGuard, type ExecutionProfile } from "./policy.js";
@@ -92,7 +93,7 @@ export class ShellService {
 
 export function createShellExecuteService(shellService: ShellService): OSService<ShellExecuteRequest, ShellExecutionResult> {
 	return {
-		name: "shell.execute",
+		name: SHELL_EXECUTE,
 		requiredPermissions: ["shell:exec"],
 		execute: async (req, ctx) => shellService.execute(req, ctx),
 	};
@@ -100,7 +101,7 @@ export function createShellExecuteService(shellService: ShellService): OSService
 
 export function createShellEnvSetService(shellService: ShellService): OSService<ShellEnvSetRequest, { ok: true }> {
 	return {
-		name: "shell.env.set",
+		name: SHELL_ENV_SET,
 		requiredPermissions: ["shell:exec"],
 		execute: async (req, ctx) => {
 			shellService.sessions.setVar(ctx.sessionId, req.key, req.value);
@@ -111,7 +112,7 @@ export function createShellEnvSetService(shellService: ShellService): OSService<
 
 export function createShellEnvUnsetService(shellService: ShellService): OSService<ShellEnvUnsetRequest, { ok: true }> {
 	return {
-		name: "shell.env.unset",
+		name: SHELL_ENV_UNSET,
 		requiredPermissions: ["shell:exec"],
 		execute: async (req, ctx) => {
 			shellService.sessions.unsetVar(ctx.sessionId, req.key);
@@ -122,7 +123,7 @@ export function createShellEnvUnsetService(shellService: ShellService): OSServic
 
 export function createShellEnvListService(shellService: ShellService): OSService<ShellEnvListRequest, { env: NodeJS.ProcessEnv }> {
 	return {
-		name: "shell.env.list",
+		name: SHELL_ENV_LIST,
 		requiredPermissions: ["shell:exec"],
 		execute: async (_req, ctx) => ({
 			env: shellService.sessions.get(ctx.sessionId),

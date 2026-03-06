@@ -1,4 +1,4 @@
-import type { JSXElement } from './core/types';
+import type { JSXElement } from './core/types.js';
 
 /**
  * JSX factory for CTP-Lite

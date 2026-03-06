@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { AppManager } from "../app-manager/index.js";
 import { ModelService } from "../model-service/index.js";
-import { createTaskDecomposeService, createTaskLoopService, createTaskSubmitService } from "./index.js";
+import {
+	createSystemTaskManifest,
+	createTaskDecomposeService,
+	createTaskLoopService,
+	createTaskSubmitService,
+} from "./index.js";
+
+const systemRuntime = {
+	execute: async <Request, Response>(_service: string, _request: Request, _context?: { appId: string; sessionId: string; permissions: string[]; workingDirectory: string }): Promise<Response> => {
+		throw new Error("not-used");
+	},
+	services: [],
+};
 
 function createInstalledManager(): AppManager {
 	const manager = new AppManager();
@@ -27,6 +39,12 @@ function createInstalledManager(): AppManager {
 }
 
 describe("TaskRuntime", () => {
+	it("creates system task manifest with standard route", () => {
+		const manifest = createSystemTaskManifest("/abs/system-task.page.js");
+		expect(manifest.id).toBe("system");
+		expect(manifest.entry.pages[0]?.route).toBe("system://task");
+	});
+
 	it("decomposes text task into subtasks", async () => {
 		const service = createTaskDecomposeService();
 		const response = await service.execute(
@@ -57,6 +75,7 @@ describe("TaskRuntime", () => {
 				}),
 			},
 			model,
+			systemRuntime,
 		);
 		const result = await service.execute(
 			{ text: "list todos", route: "todo://list", maxSteps: 3 },
@@ -88,6 +107,7 @@ describe("TaskRuntime", () => {
 				}),
 			},
 			model,
+			systemRuntime,
 		);
 		const result = await service.execute(
 			{ text: "run task", route: "todo://list", maxSteps: 5, budget: 20 },
@@ -118,6 +138,7 @@ describe("TaskRuntime", () => {
 				}),
 			},
 			model,
+			systemRuntime,
 		);
 		const result = await service.execute(
 			{ route: "todo://list", taskGoal: "execute loop task", maxSteps: 3, stopCondition: "DONE" },

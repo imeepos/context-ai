@@ -1,6 +1,7 @@
 import type { OSService } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 import { OSError } from "../kernel/errors.js";
+import { PACKAGE_INSTALL, PACKAGE_LIST } from "../tokens.js";
 
 export interface AppPackage {
 	name: string;
@@ -44,7 +45,7 @@ export interface PackageInstallRequest {
 
 export function createPackageInstallService(service: PackageService): OSService<PackageInstallRequest, { ok: true }> {
 	return {
-		name: "package.install",
+		name: PACKAGE_INSTALL,
 		requiredPermissions: ["package:write"],
 		execute: async (req) => {
 			service.install(req.package);
@@ -55,7 +56,7 @@ export function createPackageInstallService(service: PackageService): OSService<
 
 export function createPackageListService(service: PackageService): OSService<Record<string, never>, { packages: AppPackage[] }> {
 	return {
-		name: "package.list",
+		name: PACKAGE_LIST,
 		requiredPermissions: ["package:read"],
 		execute: async () => ({ packages: service.list() }),
 	};

@@ -2,14 +2,14 @@ import type {
   JSXElement,
   RenderedContext,
   DataView,
-} from './types';
-import type { ContextProps } from '../components/context';
-import type { DataProps } from '../components/data';
-import type { ToolProps } from '../components/tool';
-import type { GroupProps } from '../components/group';
-import type { TextProps } from '../components/text';
-import type { ExampleProps } from '../components/example';
-import { buildPrompt } from './builder';
+} from './types.js';
+import type { ContextProps } from '../components/context.js';
+import type { DataProps } from '../components/data.js';
+import type { ToolProps } from '../components/tool.js';
+import type { GroupProps } from '../components/group.js';
+import type { TextProps } from '../components/text.js';
+import type { ExampleProps } from '../components/example.js';
+import { buildPrompt } from './builder.js';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
 
 /**
