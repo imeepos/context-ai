@@ -854,6 +854,69 @@ describe("createDefaultLLMOS", () => {
 		}
 	});
 
+	it("restores capabilities after install rollback to previous version", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-rollback-caps-"));
+		try {
+			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
+			const context = {
+				appId: "app.up",
+				sessionId: "session-rollback-caps",
+				permissions: ["app:manage", "app:read", "system:read"],
+				workingDirectory: root,
+			};
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "app.up",
+						name: "Up",
+						version: "1.0.0",
+						entry: "index.js",
+						permissions: ["app:manage", "app:read", "store:read", "system:read"],
+					},
+				},
+				context,
+			);
+			const upgraded = await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "app.up",
+						name: "Up",
+						version: "1.1.0",
+						entry: {
+							pages: [
+								{
+									id: "v2",
+									route: "app.up://v2",
+									name: "V2",
+									description: "V2 page",
+									path: "v2.js",
+									default: true,
+								},
+							],
+						},
+						permissions: ["app:manage", "app:read", "store:write", "system:read"],
+					},
+				},
+				context,
+			);
+			await os.kernel.execute(
+				"app.install.rollback",
+				{
+					appId: "app.up",
+					rollbackToken: upgraded.report.rollbackToken,
+				},
+				context,
+			);
+			const caps = await os.kernel.execute("system.capabilities", { appId: "app.up" }, context);
+			expect(caps.capabilities).toContain("store:read");
+			expect(caps.capabilities).not.toContain("store:write");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("caps net journal size by configured limit", async () => {
 		const root = await mkdtemp(join(tmpdir(), "os-kernel-net-journal-"));
 		try {
