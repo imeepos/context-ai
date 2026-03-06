@@ -308,6 +308,22 @@ export interface SystemErrorsResponse {
 	byErrorCode: Record<string, number>;
 	byReason: Record<string, number>;
 	topReasons: Array<{ reason: string; count: number }>;
+	byService: Record<
+		string,
+		{
+			total: number;
+			byErrorCode: Record<string, number>;
+		}
+	>;
+	recent: Array<{
+		timestamp: string;
+		service: string;
+		traceId?: string;
+		errorCode?: string;
+		error?: string;
+		appId: string;
+		sessionId: string;
+	}>;
 }
 
 export function createSystemErrorsService(
@@ -323,21 +339,46 @@ export function createSystemErrorsService(
 			}
 			const byErrorCode: Record<string, number> = {};
 			const byReason: Record<string, number> = {};
+			const byService: Record<
+				string,
+				{
+					total: number;
+					byErrorCode: Record<string, number>;
+				}
+			> = {};
 			for (const record of records) {
 				const code = record.errorCode ?? "UNKNOWN";
 				byErrorCode[code] = (byErrorCode[code] ?? 0) + 1;
 				const reason = record.error?.trim() || "UNKNOWN";
 				byReason[reason] = (byReason[reason] ?? 0) + 1;
+				const serviceBucket = byService[record.service] ?? { total: 0, byErrorCode: {} };
+				serviceBucket.total += 1;
+				serviceBucket.byErrorCode[code] = (serviceBucket.byErrorCode[code] ?? 0) + 1;
+				byService[record.service] = serviceBucket;
 			}
 			const topReasons = Object.entries(byReason)
 				.map(([reason, count]) => ({ reason, count }))
 				.sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason))
 				.slice(0, 10);
+			const recent = records
+				.slice(-20)
+				.map((record) => ({
+					timestamp: record.timestamp,
+					service: record.service,
+					traceId: record.traceId,
+					errorCode: record.errorCode,
+					error: record.error,
+					appId: record.appId,
+					sessionId: record.sessionId,
+				}))
+				.reverse();
 			return {
 				totalFailures: records.length,
 				byErrorCode,
 				byReason,
 				topReasons,
+				byService,
+				recent,
 			};
 		},
 	};

@@ -289,6 +289,9 @@ describe("SystemService", () => {
 		expect(response.byReason.boom).toBe(1);
 		expect(response.topReasons[0]?.reason).toBe("boom");
 		expect(response.topReasons[0]?.count).toBe(1);
+		expect(response.byService["err.demo"]?.total).toBe(1);
+		expect(response.byService["err.demo"]?.byErrorCode.E_SERVICE_EXECUTION).toBe(1);
+		expect(response.recent[0]?.service).toBe("err.demo");
 	});
 
 	it("evaluates policy decisions", async () => {
