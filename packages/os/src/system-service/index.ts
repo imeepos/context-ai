@@ -180,17 +180,24 @@ export interface SystemAppRollbackState {
 
 export interface SystemAppRollbackStatsRequest {
 	appId?: string;
+	soonToExpireWindowMs?: number;
 }
 
 export interface SystemAppRollbackStatsResponse {
 	totalSnapshots: number;
 	expiredSnapshots: number;
 	activeSnapshots: number;
+	soonToExpireSnapshots: number;
+	oldestCreatedAt?: string;
+	newestCreatedAt?: string;
 	byApp: Array<{
 		appId: string;
 		total: number;
 		expired: number;
 		active: number;
+		soonToExpire: number;
+		oldestCreatedAt?: string;
+		newestCreatedAt?: string;
 		recentCreatedAt?: string;
 	}>;
 }
@@ -369,19 +376,42 @@ export function createSystemAppRollbackStatsService(
 		execute: async (req) => {
 			const snapshots = appManager.listRollbackSnapshots(req.appId);
 			const now = Date.now();
+			const soonWindowMs =
+				typeof req.soonToExpireWindowMs === "number" && Number.isFinite(req.soonToExpireWindowMs) && req.soonToExpireWindowMs > 0
+					? Math.floor(req.soonToExpireWindowMs)
+					: 5 * 60 * 1000;
 			const byAppMap = new Map<
 				string,
-				{ total: number; expired: number; active: number; recentCreatedAt?: string }
+				{
+					total: number;
+					expired: number;
+					active: number;
+					soonToExpire: number;
+					oldestCreatedAt?: string;
+					newestCreatedAt?: string;
+				}
 			>();
 			for (const snapshot of snapshots) {
 				const expiresAt = Date.parse(snapshot.expiresAt);
 				const isExpired = !Number.isNaN(expiresAt) && expiresAt <= now;
-				const bucket = byAppMap.get(snapshot.appId) ?? { total: 0, expired: 0, active: 0, recentCreatedAt: undefined };
+				const isSoonToExpire = !isExpired && !Number.isNaN(expiresAt) && expiresAt <= now + soonWindowMs;
+				const bucket = byAppMap.get(snapshot.appId) ?? {
+					total: 0,
+					expired: 0,
+					active: 0,
+					soonToExpire: 0,
+					oldestCreatedAt: undefined,
+					newestCreatedAt: undefined,
+				};
 				bucket.total += 1;
 				bucket.expired += isExpired ? 1 : 0;
 				bucket.active += isExpired ? 0 : 1;
-				if (!bucket.recentCreatedAt || Date.parse(snapshot.createdAt) > Date.parse(bucket.recentCreatedAt)) {
-					bucket.recentCreatedAt = snapshot.createdAt;
+				bucket.soonToExpire += isSoonToExpire ? 1 : 0;
+				if (!bucket.oldestCreatedAt || Date.parse(snapshot.createdAt) < Date.parse(bucket.oldestCreatedAt)) {
+					bucket.oldestCreatedAt = snapshot.createdAt;
+				}
+				if (!bucket.newestCreatedAt || Date.parse(snapshot.createdAt) > Date.parse(bucket.newestCreatedAt)) {
+					bucket.newestCreatedAt = snapshot.createdAt;
 				}
 				byAppMap.set(snapshot.appId, bucket);
 			}
@@ -390,13 +420,24 @@ export function createSystemAppRollbackStatsService(
 				total: item.total,
 				expired: item.expired,
 				active: item.active,
-				recentCreatedAt: item.recentCreatedAt,
+				soonToExpire: item.soonToExpire,
+				oldestCreatedAt: item.oldestCreatedAt,
+				newestCreatedAt: item.newestCreatedAt,
+				recentCreatedAt: item.newestCreatedAt,
 			}));
 			const expiredSnapshots = byApp.reduce((sum, item) => sum + item.expired, 0);
+			const soonToExpireSnapshots = byApp.reduce((sum, item) => sum + item.soonToExpire, 0);
+			const allCreatedAt = snapshots
+				.map((snapshot) => snapshot.createdAt)
+				.filter((createdAt) => !Number.isNaN(Date.parse(createdAt)))
+				.sort((a, b) => Date.parse(a) - Date.parse(b));
 			return {
 				totalSnapshots: snapshots.length,
 				expiredSnapshots,
 				activeSnapshots: snapshots.length - expiredSnapshots,
+				soonToExpireSnapshots,
+				oldestCreatedAt: allCreatedAt[0],
+				newestCreatedAt: allCreatedAt[allCreatedAt.length - 1],
 				byApp,
 			};
 		},
@@ -405,32 +446,47 @@ export function createSystemAppRollbackStatsService(
 
 export function createSystemAppRollbackGCService(
 	appManager: AppManager,
-): OSService<{ appId?: string }, { scanned: number; removed: number; remaining: number }> {
+): OSService<
+	{ appId?: string; dryRun?: boolean; limit?: number },
+	{ scanned: number; eligible: number; removed: number; remaining: number; dryRun: boolean }
+> {
 	return {
 		name: "system.app.rollback.gc",
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
-			if (req.appId) {
-				const snapshots = appManager.listRollbackSnapshots(req.appId);
-				let removed = 0;
-				for (const snapshot of snapshots) {
-					const expiresAt = Date.parse(snapshot.expiresAt);
-					if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
-						appManager.consumeRollbackSnapshot(snapshot.token, { appId: snapshot.appId });
-						removed += 1;
-					}
-				}
+			const snapshots = appManager.listRollbackSnapshots(req.appId);
+			const now = Date.now();
+			let candidates = snapshots.filter((snapshot) => {
+				const expiresAt = Date.parse(snapshot.expiresAt);
+				return !Number.isNaN(expiresAt) && expiresAt <= now;
+			});
+			if (typeof req.limit === "number" && Number.isFinite(req.limit) && req.limit > 0) {
+				candidates = candidates.slice(0, Math.floor(req.limit));
+			}
+			if (req.dryRun) {
 				return {
 					scanned: snapshots.length,
-					removed,
-					remaining: appManager.listRollbackSnapshots(req.appId).length,
+					eligible: candidates.length,
+					removed: 0,
+					remaining: snapshots.length,
+					dryRun: true,
 				};
 			}
-			const gc = appManager.garbageCollectExpiredRollbackSnapshots();
+			let removed = 0;
+			for (const snapshot of candidates) {
+				const before = appManager.listRollbackSnapshots(req.appId).length;
+				appManager.consumeRollbackSnapshot(snapshot.token, req.appId ? { appId: req.appId } : undefined);
+				const after = appManager.listRollbackSnapshots(req.appId).length;
+				if (after < before) {
+					removed += 1;
+				}
+			}
 			return {
-				scanned: gc.scanned,
-				removed: gc.removed,
-				remaining: appManager.listRollbackSnapshots().length,
+				scanned: snapshots.length,
+				eligible: candidates.length,
+				removed,
+				remaining: appManager.listRollbackSnapshots(req.appId).length,
+				dryRun: false,
 			};
 		},
 	};

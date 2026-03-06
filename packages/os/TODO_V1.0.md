@@ -252,3 +252,11 @@ interface AppInstallDeltaReport {
 - [x] 审计/指标/事件/告警贯通
 - [x] 导出完整性（`signature + contentSha256`）
 - [x] 增加测试：拒绝路径与审计可追溯
+
+## 11. V1.0.1 查漏补缺（本轮完成）
+- [x] 回滚状态导入强校验（快照结构、时间字段、install report 字段）
+- [x] `system.app.rollback.gc` 支持 `dryRun` 与 `limit`
+- [x] `system.app.rollback.gc` 返回 `eligible/removed/remaining/dryRun`
+- [x] `system.app.rollback.stats` 支持 `soonToExpireWindowMs`
+- [x] `system.app.rollback.stats` 增加 `soonToExpireSnapshots/oldestCreatedAt/newestCreatedAt`
+- [x] 新增与更新 Vitest：非法导入拒绝、GC dry-run/limit、stats 扩展字段

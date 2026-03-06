@@ -204,9 +204,19 @@ export class AppManager {
 		}>;
 		installReports: AppInstallReportState[];
 	}): void {
+		if (!input || typeof input !== "object") {
+			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: object required");
+		}
+		if (!Array.isArray(input.snapshots)) {
+			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshots must be array");
+		}
+		if (!Array.isArray(input.installReports)) {
+			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: installReports must be array");
+		}
 		this.rollbackSnapshots.clear();
 		this.installReports.clear();
 		for (const snapshot of input.snapshots ?? []) {
+			validateRollbackSnapshot(snapshot);
 			this.setRollbackSnapshot(snapshot.token, {
 				appId: snapshot.appId,
 				previous: snapshot.previous,
@@ -216,6 +226,7 @@ export class AppManager {
 			});
 		}
 		for (const state of input.installReports ?? []) {
+			validateInstallReportState(state);
 			this.installReports.set(state.report.appId, {
 				report: { ...state.report },
 				lastAction: state.lastAction,
@@ -851,4 +862,66 @@ export type { AppQuota } from "./quota.js";
 
 function cloneManifest(manifest: AppManifestV1): AppManifestV1 {
 	return JSON.parse(JSON.stringify(manifest)) as AppManifestV1;
+}
+
+function validateIsoTimestamp(value: string, field: string): void {
+	if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
+		throw new OSError("E_VALIDATION_FAILED", `Invalid rollback state: ${field} must be ISO datetime string`);
+	}
+}
+
+function validateRollbackSnapshot(snapshot: {
+	token: string;
+	appId: string;
+	createdAt: string;
+	expiresAt: string;
+	previous?: AppManifestV1;
+	previousQuota?: AppQuota;
+}): void {
+	if (!snapshot || typeof snapshot !== "object") {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot object required");
+	}
+	if (typeof snapshot.token !== "string" || snapshot.token.trim().length === 0) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.token required");
+	}
+	if (typeof snapshot.appId !== "string" || snapshot.appId.trim().length === 0) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.appId required");
+	}
+	validateIsoTimestamp(snapshot.createdAt, "snapshot.createdAt");
+	validateIsoTimestamp(snapshot.expiresAt, "snapshot.expiresAt");
+	if (Date.parse(snapshot.expiresAt) <= Date.parse(snapshot.createdAt)) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.expiresAt must be after createdAt");
+	}
+	if (snapshot.previous) {
+		normalizeManifest(snapshot.previous);
+	}
+	if (snapshot.previousQuota) {
+		const { maxTokens, maxToolCalls } = snapshot.previousQuota;
+		if (!Number.isFinite(maxTokens) || maxTokens <= 0 || !Number.isFinite(maxToolCalls) || maxToolCalls <= 0) {
+			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.previousQuota invalid");
+		}
+	}
+}
+
+function validateInstallReportState(state: AppInstallReportState): void {
+	if (!state || typeof state !== "object" || !state.report) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: install report object required");
+	}
+	if (state.lastAction !== "install" && state.lastAction !== "rollback") {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: install report lastAction invalid");
+	}
+	validateIsoTimestamp(state.updatedAt, "installReport.updatedAt");
+	const report = state.report;
+	if (typeof report.appId !== "string" || report.appId.trim().length === 0) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report.appId required");
+	}
+	if (typeof report.version !== "string" || report.version.trim().length === 0) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report.version required");
+	}
+	if (!Array.isArray(report.addedPages) || !Array.isArray(report.addedPolicies) || !Array.isArray(report.addedObservability)) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report arrays required");
+	}
+	if (typeof report.rollbackToken !== "string" || report.rollbackToken.trim().length === 0) {
+		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report.rollbackToken required");
+	}
 }

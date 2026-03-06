@@ -491,6 +491,34 @@ describe("SystemService", () => {
 		expect(recoverManager.getInstallReport("todo")?.version).toBe("1.0.0");
 	});
 
+	it("rejects invalid rollback import state", async () => {
+		const manager = new AppManager();
+		const importService = createSystemAppRollbackStateImportService(manager);
+		await expect(
+			importService.execute(
+				{
+					state: {
+						snapshots: [
+							{
+								token: "",
+								appId: "todo",
+								createdAt: "bad-date",
+								expiresAt: "2020-01-01T00:00:00.000Z",
+							},
+						],
+						installReports: [],
+					} as ReturnType<AppManager["exportRollbackState"]>,
+				},
+				{
+					appId: "app.demo",
+					sessionId: "s6-rollback-state-invalid",
+					permissions: ["system:write"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toMatchObject({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>);
+	});
+
 	it("returns rollback stats and supports gc", async () => {
 		const manager = new AppManager();
 		manager.setRollbackSnapshot("t-expired", {
@@ -515,9 +543,24 @@ describe("SystemService", () => {
 		);
 		expect(before.totalSnapshots).toBe(2);
 		expect(before.expiredSnapshots).toBe(1);
+		expect(before.soonToExpireSnapshots).toBe(1);
+		expect(typeof before.oldestCreatedAt).toBe("string");
+		expect(typeof before.newestCreatedAt).toBe("string");
 		const gcService = createSystemAppRollbackGCService(manager);
+		const dryRun = await gcService.execute(
+			{ dryRun: true, limit: 1 },
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-gc",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(dryRun.removed).toBe(0);
+		expect(dryRun.eligible).toBe(1);
+		expect(dryRun.remaining).toBe(2);
 		const gc = await gcService.execute(
-			{},
+			{ limit: 1 },
 			{
 				appId: "app.demo",
 				sessionId: "s6-rollback-gc",
@@ -526,6 +569,8 @@ describe("SystemService", () => {
 			},
 		);
 		expect(gc.removed).toBeGreaterThan(0);
+		expect(gc.dryRun).toBe(false);
+		expect(gc.eligible).toBe(1);
 		const after = await statsService.execute(
 			{},
 			{
@@ -537,6 +582,7 @@ describe("SystemService", () => {
 		);
 		expect(after.totalSnapshots).toBe(1);
 		expect(after.expiredSnapshots).toBe(0);
+		expect(after.byApp[0]?.soonToExpire).toBe(1);
 	});
 
 	it("returns route registry snapshot", async () => {
