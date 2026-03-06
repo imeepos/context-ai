@@ -22,6 +22,7 @@ export class AppManager {
 		string,
 		{ appId: string; previous?: AppManifestV1; previousQuota?: AppQuota }
 	>();
+	private static readonly MAX_ROLLBACK_SNAPSHOTS_PER_APP = 20;
 
 	install(manifest: AppManifest, quota?: AppQuota): void {
 		const normalized = normalizeManifest(manifest);
@@ -98,6 +99,7 @@ export class AppManager {
 			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
 			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
 		});
+		this.pruneRollbackSnapshots(snapshot.appId);
 	}
 
 	consumeRollbackSnapshot(
@@ -115,6 +117,17 @@ export class AppManager {
 			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
 			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
 		};
+	}
+
+	private pruneRollbackSnapshots(appId: string): void {
+		const tokensForApp = [...this.rollbackSnapshots.entries()]
+			.filter(([, snapshot]) => snapshot.appId === appId)
+			.map(([token]) => token);
+		const overflow = tokensForApp.length - AppManager.MAX_ROLLBACK_SNAPSHOTS_PER_APP;
+		if (overflow <= 0) return;
+		for (const token of tokensForApp.slice(0, overflow)) {
+			this.rollbackSnapshots.delete(token);
+		}
 	}
 }
 

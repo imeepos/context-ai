@@ -885,6 +885,20 @@ describe("AppManager", () => {
 		expect(manager.quota.getQuota("todo")).toEqual({ maxToolCalls: 10, maxTokens: 100 });
 	});
 
+	it("prunes rollback snapshots per app to bounded size", () => {
+		const manager = new AppManager();
+		for (let i = 0; i < 25; i += 1) {
+			manager.setRollbackSnapshot(`todo@1.0.${i}:t`, { appId: "todo" });
+		}
+		expect(manager.consumeRollbackSnapshot("todo@1.0.0:t", { appId: "todo" })).toBeUndefined();
+		expect(manager.consumeRollbackSnapshot("todo@1.0.4:t", { appId: "todo" })).toBeUndefined();
+		expect(manager.consumeRollbackSnapshot("todo@1.0.5:t", { appId: "todo" })).toEqual({
+			appId: "todo",
+			previous: undefined,
+			previousQuota: undefined,
+		});
+	});
+
 	it("supports v1 install with signature verification", async () => {
 		const manager = new AppManager();
 		const security = new SecurityService();
