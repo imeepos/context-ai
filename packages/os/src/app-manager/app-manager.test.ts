@@ -638,6 +638,89 @@ describe("AppManager", () => {
 		);
 	});
 
+	it("does not consume rollback token on app id mismatch", async () => {
+		const manager = new AppManager();
+		const install = createAppInstallService(manager);
+		const rollback = createAppInstallRollbackService(manager);
+		await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.0.0",
+					entry: {
+						pages: [
+							{
+								id: "list",
+								route: "todo://list",
+								name: "List",
+								description: "Show todo list",
+								path: "src/todo/list.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:manage", "app:read"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-token",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const upgraded = await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.1.0",
+					entry: {
+						pages: [
+							{
+								id: "board",
+								route: "todo://board",
+								name: "Board",
+								description: "Show todo board",
+								path: "src/todo/board.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:manage", "app:read"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-token",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		await expect(
+			rollback.execute(
+				{ appId: "other", rollbackToken: upgraded.report.rollbackToken },
+				{
+					appId: "todo",
+					sessionId: "s-install-rollback-token",
+					permissions: ["app:manage"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+		const reverted = await rollback.execute(
+			{ appId: "todo", rollbackToken: upgraded.report.rollbackToken },
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-token",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(reverted.restoredVersion).toBe("1.0.0");
+	});
+
 	it("supports v1 install with signature verification", async () => {
 		const manager = new AppManager();
 		const security = new SecurityService();

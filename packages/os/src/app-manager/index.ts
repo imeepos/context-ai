@@ -93,10 +93,16 @@ export class AppManager {
 		});
 	}
 
-	consumeRollbackSnapshot(rollbackToken: string): { appId: string; previous?: AppManifestV1 } | undefined {
+	consumeRollbackSnapshot(
+		rollbackToken: string,
+		options?: { appId?: string },
+	): { appId: string; previous?: AppManifestV1 } | undefined {
 		const snapshot = this.rollbackSnapshots.get(rollbackToken);
-		this.rollbackSnapshots.delete(rollbackToken);
 		if (!snapshot) return undefined;
+		if (options?.appId && snapshot.appId !== options.appId) {
+			return undefined;
+		}
+		this.rollbackSnapshots.delete(rollbackToken);
 		return {
 			appId: snapshot.appId,
 			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
@@ -221,8 +227,8 @@ export function createAppInstallRollbackService(
 		name: "app.install.rollback",
 		requiredPermissions: ["app:manage"],
 		execute: async (req) => {
-			const snapshot = manager.consumeRollbackSnapshot(req.rollbackToken);
-			if (!snapshot || snapshot.appId !== req.appId) {
+			const snapshot = manager.consumeRollbackSnapshot(req.rollbackToken, { appId: req.appId });
+			if (!snapshot) {
 				throw new OSError("E_VALIDATION_FAILED", `Invalid rollback token: ${req.rollbackToken}`);
 			}
 			if (snapshot.previous) {
