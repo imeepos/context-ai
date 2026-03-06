@@ -194,6 +194,8 @@ describe("AppManager", () => {
 		);
 		expect(result.prompt).toContain("todo://list");
 		expect(result.tools[0]?.name).toBe("todo.list");
+		const stats = manager.routes.stats("todo");
+		expect(stats[0]?.success).toBeGreaterThan(0);
 	});
 
 	it("validates runtime tools against route app permissions", async () => {

@@ -114,6 +114,14 @@ describe("createDefaultLLMOS", () => {
 			expect(apps.apps).toHaveLength(3);
 			const installEvents = await os.kernel.execute("notification.list", { topic: "system.app.install", limit: 10 }, context);
 			expect(installEvents.notifications.length).toBeGreaterThan(0);
+			const routes = await os.kernel.execute(
+				"system.routes",
+				{ appId: "app.default", prefix: "app.default://", offset: 0, limit: 10 },
+				context,
+			);
+			expect(routes.total).toBeGreaterThan(0);
+			const routeStats = await os.kernel.execute("system.routes.stats", { appId: "app.default" }, context);
+			expect(Array.isArray(routeStats.stats)).toBe(true);
 
 			await os.kernel.execute("store.set", { key: "name", value: "ctp" }, context);
 			const result = await os.kernel.execute("store.get", { key: "name" }, context);

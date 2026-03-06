@@ -31,6 +31,36 @@ describe("AppRouteRegistry", () => {
 		);
 	});
 
+	it("tracks route render stats", () => {
+		const registry = new AppRouteRegistry();
+		registry.register({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: [],
+		});
+		registry.recordRender("todo://list", { success: true });
+		registry.recordRender("todo://list", { success: false, error: "boom" });
+		const stats = registry.stats("todo");
+		expect(stats).toHaveLength(1);
+		expect(stats[0]?.total).toBe(2);
+		expect(stats[0]?.success).toBe(1);
+		expect(stats[0]?.failure).toBe(1);
+		expect(stats[0]?.lastError).toContain("boom");
+	});
+
 	it("rejects duplicate route from another app", () => {
 		const registry = new AppRouteRegistry();
 		registry.register({

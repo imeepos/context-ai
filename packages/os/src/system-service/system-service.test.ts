@@ -19,6 +19,7 @@ import {
 	createSystemAppInstallReportService,
 	createSystemAppDeltaService,
 	createSystemRoutesService,
+	createSystemRoutesStatsService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
 	createSystemErrorsKeysRotateService,
@@ -320,6 +321,44 @@ describe("SystemService", () => {
 		);
 		expect(filtered.total).toBe(1);
 		expect(filtered.routes).toEqual(["todo://detail"]);
+	});
+
+	it("returns route render stats snapshot", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:read"],
+		});
+		manager.routes.recordRender("todo://list", { success: true });
+		manager.routes.recordRender("todo://list", { success: false, error: "render boom" });
+		const service = createSystemRoutesStatsService(manager);
+		const response = await service.execute(
+			{ appId: "todo" },
+			{
+				appId: "app.demo",
+				sessionId: "s6-routes-stats",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.stats).toHaveLength(1);
+		expect(response.stats[0]?.route).toBe("todo://list");
+		expect(response.stats[0]?.total).toBe(2);
+		expect(response.stats[0]?.failure).toBe(1);
 	});
 
 	it("returns all capabilities map", async () => {

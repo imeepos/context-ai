@@ -107,6 +107,7 @@ import {
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
 	createSystemRoutesService,
+	createSystemRoutesStatsService,
 	createSystemAppInstallReportService,
 	createSystemAppDeltaService,
 	createSystemErrorsService,
@@ -356,6 +357,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.health", () => createSystemHealthService(kernel));
 	registerWhenEnabled("system.dependencies", () => createSystemDependenciesService(kernel));
 	registerWhenEnabled("system.routes", () => createSystemRoutesService(appManager));
+	registerWhenEnabled("system.routes.stats", () => createSystemRoutesStatsService(appManager));
 	registerWhenEnabled("system.app.install.report", () => createSystemAppInstallReportService(appManager));
 	registerWhenEnabled("system.app.delta", () => createSystemAppDeltaService(appManager));
 	registerWhenEnabled("system.metrics", () => createSystemMetricsService(kernel));

@@ -51,6 +51,21 @@ export interface SystemRoutesResponse {
 	total: number;
 }
 
+export interface SystemRoutesStatsRequest {
+	appId?: string;
+}
+
+export interface SystemRoutesStatsResponse {
+	stats: Array<{
+		route: string;
+		total: number;
+		success: number;
+		failure: number;
+		lastRenderedAt?: string;
+		lastError?: string;
+	}>;
+}
+
 export function createSystemRoutesService(
 	appManager: AppManager,
 ): OSService<SystemRoutesRequest, SystemRoutesResponse> {
@@ -71,6 +86,18 @@ export function createSystemRoutesService(
 				total,
 			};
 		},
+	};
+}
+
+export function createSystemRoutesStatsService(
+	appManager: AppManager,
+): OSService<SystemRoutesStatsRequest, SystemRoutesStatsResponse> {
+	return {
+		name: "system.routes.stats",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => ({
+			stats: appManager.routes.stats(req.appId),
+		}),
 	};
 }
 

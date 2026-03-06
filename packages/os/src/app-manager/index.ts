@@ -308,26 +308,39 @@ export function createAppPageRenderService(
 		execute: async (req, ctx) => {
 			const resolved = manager.routes.resolve(req.route);
 			if (!manager.isEnabled(resolved.appId)) {
+				manager.routes.recordRender(req.route, {
+					success: false,
+					error: `App is disabled: ${resolved.appId}`,
+				});
 				throw new OSError("E_APP_NOT_REGISTERED", `App is disabled: ${resolved.appId}`);
 			}
-			const rendered = await renderer.render({
-				appId: resolved.appId,
-				page: resolved.page,
-				context: {
-					appId: ctx.appId,
-					sessionId: ctx.sessionId,
-					permissions: ctx.permissions,
-					workingDirectory: ctx.workingDirectory,
-				},
-			});
-			return {
-				appId: resolved.appId,
-				page: resolved.page,
-				prompt: rendered.prompt,
-				tools: rendered.tools,
-				dataViews: rendered.dataViews,
-				metadata: rendered.metadata,
-			};
+			try {
+				const rendered = await renderer.render({
+					appId: resolved.appId,
+					page: resolved.page,
+					context: {
+						appId: ctx.appId,
+						sessionId: ctx.sessionId,
+						permissions: ctx.permissions,
+						workingDirectory: ctx.workingDirectory,
+					},
+				});
+				manager.routes.recordRender(req.route, { success: true });
+				return {
+					appId: resolved.appId,
+					page: resolved.page,
+					prompt: rendered.prompt,
+					tools: rendered.tools,
+					dataViews: rendered.dataViews,
+					metadata: rendered.metadata,
+				};
+			} catch (error) {
+				manager.routes.recordRender(req.route, {
+					success: false,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
 		},
 	};
 }
