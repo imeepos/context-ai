@@ -119,6 +119,8 @@ describe("createDefaultLLMOS", () => {
 			expect(metricsOne.metrics).toHaveLength(1);
 			const auditAll = await os.kernel.execute("system.audit", { service: "store.set", limit: 5 }, context);
 			expect(auditAll.records.length).toBeGreaterThan(0);
+			const governanceState = await os.kernel.execute("system.governance.state.export", {}, context);
+			expect(typeof governanceState.state).toBe("object");
 			const auditSession = await os.kernel.execute("system.audit", { sessionId: context.sessionId }, context);
 			expect(auditSession.records.every((r) => r.sessionId === context.sessionId)).toBe(true);
 			const topology = await os.kernel.execute("system.topology", {}, context);
@@ -442,6 +444,10 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(typeof baseline.passed).toBe("boolean");
+			const governancePersist = await os.kernel.execute("system.governance.state.persist", {}, context);
+			expect(governancePersist.persisted).toBe(true);
+			const governanceRecover = await os.kernel.execute("system.governance.state.recover", {}, context);
+			expect(typeof governanceRecover.recovered).toBe("boolean");
 			const schedulerState = await os.kernel.execute("scheduler.state.export", {}, context);
 			expect(Array.isArray(schedulerState.tasks)).toBe(true);
 			const schedulerPersist = await os.kernel.execute("scheduler.state.persist", {}, context);

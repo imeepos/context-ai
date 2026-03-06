@@ -63,6 +63,10 @@ import {
 	createSystemChaosRunService,
 	createSystemChaosBaselineCaptureService,
 	createSystemChaosBaselineVerifyService,
+	createSystemGovernanceStateExportService,
+	createSystemGovernanceStateImportService,
+	createSystemGovernanceStatePersistService,
+	createSystemGovernanceStateRecoverService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -1385,5 +1389,50 @@ describe("SystemService", () => {
 		);
 		expect(baselineResult.passed).toBe(true);
 		vi.useRealTimers();
+	});
+
+	it("exports/imports and persists governance state", async () => {
+		const exportService = createSystemGovernanceStateExportService();
+		const importService = createSystemGovernanceStateImportService();
+		const rotate = createSystemAuditKeysRotateService();
+		await rotate.execute(
+			{ keyId: "gk-1", secret: "gs-1", setActive: true },
+			{ appId: "app.demo", sessionId: "s40", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const exported = await exportService.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s40", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(exported.state.activeAuditKeyId).toBe("gk-1");
+
+		const fakeStore = new Map<string, unknown>();
+		const persist = createSystemGovernanceStatePersistService(
+			{
+				set: (key, value) => {
+					fakeStore.set(key, value);
+				},
+			},
+			"gov.state",
+		);
+		await persist.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s40", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+
+		await importService.execute(
+			{ state: { ...exported.state, activeAuditKeyId: "default" } },
+			{ appId: "app.demo", sessionId: "s40", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const recover = createSystemGovernanceStateRecoverService(
+			{
+				get: (key) => fakeStore.get(key),
+			},
+			"gov.state",
+		);
+		const recovered = await recover.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s40", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(recovered.recovered).toBe(true);
 	});
 });

@@ -2739,6 +2739,78 @@ const chaosBaselines = new Map<
 	}
 >();
 
+export interface GovernanceStateSnapshot {
+	sloRules: SLOThresholdRule[];
+	quotaPolicies: TenantQuotaPolicyRule[];
+	auditKeys: Array<{ keyId: string; secret: string; createdAt: string }>;
+	activeAuditKeyId: string;
+	chaosBaselines: Array<{
+		name: string;
+		capturedAt: string;
+		total: number;
+		failure: number;
+		errorRate: number;
+	}>;
+}
+
+function exportGovernanceState(): GovernanceStateSnapshot {
+	return {
+		sloRules: [...sloRules.values()],
+		quotaPolicies: [...quotaPolicies.values()],
+		auditKeys: [...auditSigningKeys.values()].map((item) => ({
+			keyId: item.keyId,
+			secret: item.secret,
+			createdAt: item.createdAt,
+		})),
+		activeAuditKeyId: activeAuditSigningKeyId,
+		chaosBaselines: [...chaosBaselines.entries()].map(([name, baseline]) => ({
+			name,
+			capturedAt: baseline.capturedAt,
+			total: baseline.total,
+			failure: baseline.failure,
+			errorRate: baseline.errorRate,
+		})),
+	};
+}
+
+function importGovernanceState(snapshot: GovernanceStateSnapshot): void {
+	sloRules.clear();
+	for (const rule of snapshot.sloRules ?? []) {
+		sloRules.set(rule.id, rule);
+	}
+	quotaPolicies.clear();
+	for (const policy of snapshot.quotaPolicies ?? []) {
+		quotaPolicies.set(policy.id, policy);
+	}
+	auditSigningKeys.clear();
+	for (const key of snapshot.auditKeys ?? []) {
+		auditSigningKeys.set(key.keyId, {
+			keyId: key.keyId,
+			secret: key.secret,
+			createdAt: key.createdAt,
+		});
+	}
+	if (!auditSigningKeys.has("default")) {
+		auditSigningKeys.set("default", {
+			keyId: "default",
+			secret: "audit-export-secret",
+			createdAt: new Date().toISOString(),
+		});
+	}
+	activeAuditSigningKeyId = snapshot.activeAuditKeyId && auditSigningKeys.has(snapshot.activeAuditKeyId)
+		? snapshot.activeAuditKeyId
+		: "default";
+	chaosBaselines.clear();
+	for (const baseline of snapshot.chaosBaselines ?? []) {
+		chaosBaselines.set(baseline.name, {
+			capturedAt: baseline.capturedAt,
+			total: baseline.total,
+			failure: baseline.failure,
+			errorRate: baseline.errorRate,
+		});
+	}
+}
+
 export function createSystemChaosBaselineCaptureService(
 	kernel: LLMOSKernel,
 ): OSService<
@@ -2835,6 +2907,69 @@ export function createSystemChaosBaselineVerifyService(
 				current,
 				baseline,
 			};
+		},
+	};
+}
+
+export function createSystemGovernanceStateExportService(): OSService<
+	Record<string, never>,
+	{ state: GovernanceStateSnapshot }
+> {
+	return {
+		name: "system.governance.state.export",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			state: exportGovernanceState(),
+		}),
+	};
+}
+
+export function createSystemGovernanceStateImportService(): OSService<
+	{ state: GovernanceStateSnapshot },
+	{ imported: true }
+> {
+	return {
+		name: "system.governance.state.import",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			importGovernanceState(req.state);
+			return { imported: true };
+		},
+	};
+}
+
+export function createSystemGovernanceStatePersistService(
+	store: {
+		set(key: string, value: unknown): void;
+	},
+	key = "system.governance.state",
+): OSService<Record<string, never>, { persisted: true }> {
+	return {
+		name: "system.governance.state.persist",
+		requiredPermissions: ["system:write"],
+		execute: async () => {
+			store.set(key, exportGovernanceState() as unknown as Record<string, unknown>);
+			return { persisted: true };
+		},
+	};
+}
+
+export function createSystemGovernanceStateRecoverService(
+	store: {
+		get(key: string): unknown;
+	},
+	key = "system.governance.state",
+): OSService<Record<string, never>, { recovered: boolean }> {
+	return {
+		name: "system.governance.state.recover",
+		requiredPermissions: ["system:write"],
+		execute: async () => {
+			const raw = store.get(key);
+			if (!raw || typeof raw !== "object") {
+				return { recovered: false };
+			}
+			importGovernanceState(raw as GovernanceStateSnapshot);
+			return { recovered: true };
 		},
 	};
 }

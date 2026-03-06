@@ -130,6 +130,10 @@ import {
 	createSystemChaosRunService,
 	createSystemChaosBaselineCaptureService,
 	createSystemChaosBaselineVerifyService,
+	createSystemGovernanceStateExportService,
+	createSystemGovernanceStateImportService,
+	createSystemGovernanceStatePersistService,
+	createSystemGovernanceStateRecoverService,
 	createSystemTopologyService,
 } from "./system-service/index.js";
 import type { OSService, PathPolicyRule } from "./types/os.js";
@@ -310,6 +314,10 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.dependencies", () => createSystemDependenciesService(kernel));
 	registerWhenEnabled("system.metrics", () => createSystemMetricsService(kernel));
 	registerWhenEnabled("system.audit", () => createSystemAuditService(kernel));
+	registerWhenEnabled("system.governance.state.export", () => createSystemGovernanceStateExportService());
+	registerWhenEnabled("system.governance.state.import", () => createSystemGovernanceStateImportService());
+	registerWhenEnabled("system.governance.state.persist", () => createSystemGovernanceStatePersistService(storeService));
+	registerWhenEnabled("system.governance.state.recover", () => createSystemGovernanceStateRecoverService(storeService));
 	registerWhenEnabled("system.audit.keys.rotate", () => createSystemAuditKeysRotateService());
 	registerWhenEnabled("system.audit.keys.list", () => createSystemAuditKeysListService());
 	registerWhenEnabled("system.audit.keys.activate", () => createSystemAuditKeysActivateService());
