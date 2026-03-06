@@ -446,9 +446,12 @@ describe("NotificationService", () => {
 	});
 
 	it("acknowledges notifications and filters unacked records", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
 		const bus = new EventBus();
 		const notification = new NotificationService(bus);
 		notification.send({ topic: "system.alert", message: "m1" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
 		notification.send({ topic: "system.alert", message: "m2" });
 		const all = notification.query({ topic: "system.alert" });
 		expect(all).toHaveLength(2);
@@ -459,6 +462,8 @@ describe("NotificationService", () => {
 		const unacked = notification.query({ topic: "system.alert", acknowledged: false });
 		expect(unacked).toHaveLength(1);
 		expect(unacked[0]?.message).toBe("m2");
+		expect(notification.query({ topic: "system.alert" })[0]?.ackedAt).toBeDefined();
+		vi.useRealTimers();
 	});
 
 	it("acknowledges notifications in batch by filter", () => {

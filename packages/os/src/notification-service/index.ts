@@ -33,6 +33,7 @@ export interface NotificationRecord {
 	message: string;
 	severity: NotificationSeverity;
 	acknowledged: boolean;
+	ackedAt?: string;
 	timestamp: string;
 }
 
@@ -184,6 +185,7 @@ export class NotificationService {
 		for (const record of this.sent) {
 			if (record.id === request.id && !record.acknowledged) {
 				record.acknowledged = true;
+				record.ackedAt = new Date().toISOString();
 				count += 1;
 			}
 		}
@@ -204,6 +206,7 @@ export class NotificationService {
 		for (const record of this.sent) {
 			if (targetIds.has(record.id) && !record.acknowledged) {
 				record.acknowledged = true;
+				record.ackedAt = new Date().toISOString();
 				count += 1;
 			}
 		}

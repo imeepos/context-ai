@@ -22,6 +22,7 @@ import {
 	createSystemAlertsUnackedService,
 	createSystemAlertsPolicyService,
 	createSystemAlertsTrendsService,
+	createSystemAlertsSLOService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -565,6 +566,31 @@ describe("SystemService", () => {
 		expect(response.total).toBe(2);
 		expect(response.bySeverity.critical).toBe(1);
 		expect(response.bySeverity.warning).toBe(1);
+		vi.useRealTimers();
+	});
+
+	it("returns alert ack slo metrics", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "s1", severity: "error" });
+		const firstId = notification.query({ limit: 1 })[0]?.id;
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
+		if (firstId) notification.ack({ id: firstId });
+
+		const service = createSystemAlertsSLOService(notification);
+		const response = await service.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s20",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.ackedCount).toBe(1);
+		expect(response.avgAckLatencyMs).toBe(10000);
 		vi.useRealTimers();
 	});
 });
