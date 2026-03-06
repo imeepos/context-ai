@@ -224,6 +224,13 @@ export class AppManager {
 				expiresAt: snapshot.expiresAt,
 			};
 		});
+		const snapshotTokenSet = new Set<string>();
+		for (const snapshot of snapshots) {
+			if (snapshotTokenSet.has(snapshot.token)) {
+				throw new OSError("E_VALIDATION_FAILED", `Invalid rollback state: duplicate snapshot token ${snapshot.token}`);
+			}
+			snapshotTokenSet.add(snapshot.token);
+		}
 		const reports = (input.installReports ?? []).map((state) => {
 			validateInstallReportState(state);
 			return {
@@ -232,6 +239,16 @@ export class AppManager {
 				updatedAt: state.updatedAt,
 			};
 		});
+		const reportAppIdSet = new Set<string>();
+		for (const state of reports) {
+			if (reportAppIdSet.has(state.report.appId)) {
+				throw new OSError(
+					"E_VALIDATION_FAILED",
+					`Invalid rollback state: duplicate install report appId ${state.report.appId}`,
+				);
+			}
+			reportAppIdSet.add(state.report.appId);
+		}
 
 		this.rollbackSnapshots.clear();
 		this.installReports.clear();

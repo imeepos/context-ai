@@ -1056,6 +1056,64 @@ describe("AppManager", () => {
 		expect(after.snapshots.length).toBe(before.snapshots.length);
 	});
 
+	it("rejects duplicate rollback tokens on import", () => {
+		const manager = new AppManager();
+		expect(() =>
+			manager.importRollbackState({
+				snapshots: [
+					{
+						token: "dup-token",
+						appId: "todo",
+						createdAt: "2026-01-01T00:00:00.000Z",
+						expiresAt: "2026-01-01T00:10:00.000Z",
+					},
+					{
+						token: "dup-token",
+						appId: "todo",
+						createdAt: "2026-01-01T00:01:00.000Z",
+						expiresAt: "2026-01-01T00:11:00.000Z",
+					},
+				],
+				installReports: [],
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+	});
+
+	it("rejects duplicate rollback install report app ids on import", () => {
+		const manager = new AppManager();
+		expect(() =>
+			manager.importRollbackState({
+				snapshots: [],
+				installReports: [
+					{
+						report: {
+							appId: "todo",
+							version: "1.0.0",
+							addedPages: ["todo://list"],
+							addedPolicies: ["app:read"],
+							addedObservability: ["audit:todo"],
+							rollbackToken: "todo@1.0.0:t1",
+						},
+						lastAction: "install",
+						updatedAt: "2026-01-01T00:00:00.000Z",
+					},
+					{
+						report: {
+							appId: "todo",
+							version: "1.1.0",
+							addedPages: ["todo://board"],
+							addedPolicies: ["app:read"],
+							addedObservability: ["audit:todo"],
+							rollbackToken: "todo@1.1.0:t2",
+						},
+						lastAction: "rollback",
+						updatedAt: "2026-01-01T00:01:00.000Z",
+					},
+				],
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+	});
+
 	it("supports v1 install with signature verification", async () => {
 		const manager = new AppManager();
 		const security = new SecurityService();
