@@ -338,6 +338,16 @@ export interface SystemErrorsResponse {
 	}>;
 }
 
+export interface SystemErrorsExportRequest extends SystemErrorsRequest {
+	format?: "json" | "csv";
+}
+
+export interface SystemErrorsExportResponse {
+	format: "json" | "csv";
+	contentType: "application/json" | "text/csv";
+	content: string;
+}
+
 export function createSystemErrorsService(
 	kernel: LLMOSKernel,
 ): OSService<SystemErrorsRequest, SystemErrorsResponse> {
@@ -428,6 +438,44 @@ export function createSystemErrorsService(
 				byService,
 				recent,
 				trend,
+			};
+		},
+	};
+}
+
+export function createSystemErrorsExportService(
+	kernel: LLMOSKernel,
+): OSService<SystemErrorsExportRequest, SystemErrorsExportResponse> {
+	const base = createSystemErrorsService(kernel);
+	return {
+		name: "system.errors.export",
+		requiredPermissions: ["system:read"],
+		execute: async (req, ctx) => {
+			const { format = "json", ...filters } = req;
+			const response = await base.execute(filters, ctx);
+			if (format === "csv") {
+				const header = "timestamp,service,errorCode,error,traceId,appId,sessionId";
+				const rows = response.recent.map((item) =>
+					[
+						thisEscapeCsv(item.timestamp),
+						thisEscapeCsv(item.service),
+						thisEscapeCsv(item.errorCode ?? ""),
+						thisEscapeCsv(item.error ?? ""),
+						thisEscapeCsv(item.traceId ?? ""),
+						thisEscapeCsv(item.appId),
+						thisEscapeCsv(item.sessionId),
+					].join(","),
+				);
+				return {
+					format: "csv",
+					contentType: "text/csv",
+					content: [header, ...rows].join("\n"),
+				};
+			}
+			return {
+				format: "json",
+				contentType: "application/json",
+				content: JSON.stringify(response),
 			};
 		},
 	};

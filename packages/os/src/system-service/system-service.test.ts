@@ -14,6 +14,7 @@ import {
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemErrorsService,
+	createSystemErrorsExportService,
 	createSystemEventsService,
 	createSystemMetricsService,
 	createSystemAlertsService,
@@ -434,6 +435,49 @@ describe("SystemService", () => {
 		expect(paged.recent).toHaveLength(1);
 		expect(paged.recent[0]?.service).toBe("err.alpha.one");
 		vi.useRealTimers();
+	});
+
+	it("exports errors as json and csv", async () => {
+		const kernel = new LLMOSKernel();
+		kernel.registerService({
+			name: "err.export",
+			requiredPermissions: [],
+			execute: async () => {
+				throw new Error("export-boom");
+			},
+		});
+		await expect(
+			kernel.execute("err.export", {}, {
+				appId: "app.demo",
+				sessionId: "s8-export",
+				permissions: [],
+				workingDirectory: process.cwd(),
+			}),
+		).rejects.toThrow();
+		const service = createSystemErrorsExportService(kernel);
+		const json = await service.execute(
+			{ format: "json", servicePrefix: "err." },
+			{
+				appId: "app.demo",
+				sessionId: "s8-export",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(json.contentType).toBe("application/json");
+		expect(json.content).toContain("\"totalFailures\":1");
+		const csv = await service.execute(
+			{ format: "csv", servicePrefix: "err." },
+			{
+				appId: "app.demo",
+				sessionId: "s8-export",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(csv.contentType).toBe("text/csv");
+		expect(csv.content.split("\n")[0]).toBe("timestamp,service,errorCode,error,traceId,appId,sessionId");
+		expect(csv.content).toContain("err.export");
 	});
 
 	it("evaluates policy decisions", async () => {

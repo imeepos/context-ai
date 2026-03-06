@@ -97,6 +97,7 @@ import {
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
 	createSystemErrorsService,
+	createSystemErrorsExportService,
 	createSystemEventsService,
 	createSystemHealthService,
 	createSystemMetricsService,
@@ -394,6 +395,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		}),
 	);
 	registerWhenEnabled("system.errors", () => createSystemErrorsService(kernel));
+	registerWhenEnabled("system.errors.export", () => createSystemErrorsExportService(kernel));
 
 	kernel.events.subscribe<{
 		service: string;
