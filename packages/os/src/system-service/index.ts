@@ -301,6 +301,8 @@ export function createSystemSnapshotService(
 
 export interface SystemErrorsRequest {
 	service?: string;
+	windowMinutes?: number;
+	limit?: number;
 }
 
 export interface SystemErrorsResponse {
@@ -334,8 +336,15 @@ export function createSystemErrorsService(
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			let records = kernel.audit.list().filter((record) => !record.success);
+			if (req.windowMinutes && req.windowMinutes > 0) {
+				const since = Date.now() - req.windowMinutes * 60 * 1000;
+				records = records.filter((record) => Date.parse(record.timestamp) >= since);
+			}
 			if (req.service) {
 				records = records.filter((record) => record.service === req.service);
+			}
+			if (req.limit && req.limit > 0 && records.length > req.limit) {
+				records = records.slice(-req.limit);
 			}
 			const byErrorCode: Record<string, number> = {};
 			const byReason: Record<string, number> = {};

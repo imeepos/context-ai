@@ -294,6 +294,50 @@ describe("SystemService", () => {
 		expect(response.recent[0]?.service).toBe("err.demo");
 	});
 
+	it("filters errors by window and limit", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const kernel = new LLMOSKernel();
+		kernel.registerService({
+			name: "err.window",
+			requiredPermissions: [],
+			execute: async () => {
+				throw new Error("old-boom");
+			},
+		});
+		await expect(
+			kernel.execute("err.window", {}, {
+				appId: "app.demo",
+				sessionId: "s8-window",
+				permissions: [],
+				workingDirectory: process.cwd(),
+			}),
+		).rejects.toThrow();
+		vi.setSystemTime(new Date("2026-01-01T00:10:00.000Z"));
+		await expect(
+			kernel.execute("err.window", {}, {
+				appId: "app.demo",
+				sessionId: "s8-window",
+				permissions: [],
+				workingDirectory: process.cwd(),
+			}),
+		).rejects.toThrow();
+		const service = createSystemErrorsService(kernel);
+		const response = await service.execute(
+			{ service: "err.window", windowMinutes: 1, limit: 1 },
+			{
+				appId: "app.demo",
+				sessionId: "s8-window",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.totalFailures).toBe(1);
+		expect(response.byReason["old-boom"]).toBe(1);
+		expect(response.recent).toHaveLength(1);
+		vi.useRealTimers();
+	});
+
 	it("evaluates policy decisions", async () => {
 		const kernel = new LLMOSKernel();
 		const service = createSystemPolicyEvaluateService(kernel);
