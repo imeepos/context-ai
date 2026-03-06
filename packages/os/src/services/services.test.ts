@@ -600,4 +600,23 @@ describe("NotificationService", () => {
 		expect(stats.webhook?.success).toBe(1);
 		vi.useRealTimers();
 	});
+
+	it("configures standard notification channels and sends payloads", async () => {
+		const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		const configured = notification.configureChannels({
+			webhook: { url: "https://webhook.example/send" },
+			slack: { webhookUrl: "https://slack.example/hook" },
+			email: { endpoint: "https://email.example/send", to: "ops@example.com" },
+		});
+		expect(configured.configured).toEqual(["webhook", "slack", "email"]);
+		notification.send({ topic: "system.alert", message: "chan", severity: "critical" });
+		await new Promise((resolve) => setTimeout(resolve, 0));
+		expect(fetchMock).toHaveBeenCalledTimes(3);
+		const stats = notification.getChannelStats();
+		expect(stats.webhook?.success).toBe(1);
+		expect(stats.slack?.success).toBe(1);
+		expect(stats.email?.success).toBe(1);
+	});
 });

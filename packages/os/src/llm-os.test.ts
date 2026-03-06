@@ -192,6 +192,22 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(listedAlerts.notifications.length).toBeGreaterThan(0);
+			vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ok", { status: 200 }));
+			const channelConfigured = await os.kernel.execute(
+				"notification.channel.configure",
+				{
+					webhook: { url: "https://webhook.example/send" },
+				},
+				context,
+			);
+			expect(channelConfigured.configured).toContain("webhook");
+			await os.kernel.execute(
+				"notification.send",
+				{ topic: "system.alert", message: "channel dispatch", severity: "warning" },
+				context,
+			);
+			const channelStats = await os.kernel.execute("notification.channel.stats", {}, context);
+			expect(typeof channelStats.channels.webhook?.success).toBe("number");
 			const alertsSummary = await os.kernel.execute("system.alerts", { topic: "system.alert", limit: 10 }, context);
 			expect(alertsSummary.total).toBeGreaterThan(0);
 			const alertsExport = await os.kernel.execute(

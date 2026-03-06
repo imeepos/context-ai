@@ -101,6 +101,21 @@ export interface NotificationChannelAdapter {
 	send(record: NotificationRecord): Promise<void> | void;
 }
 
+export interface NotificationChannelsConfig {
+	webhook?: {
+		url: string;
+		headers?: Record<string, string>;
+	};
+	slack?: {
+		webhookUrl: string;
+	};
+	email?: {
+		endpoint: string;
+		to: string;
+		from?: string;
+	};
+}
+
 export class NotificationService {
 	private readonly sent: NotificationRecord[] = [];
 	private readonly lastSentAt = new Map<string, number>();
@@ -377,6 +392,69 @@ export class NotificationService {
 		);
 	}
 
+	configureChannels(config: NotificationChannelsConfig): { configured: string[] } {
+		const configured: string[] = [];
+		if (config.webhook?.url) {
+			this.registerChannelAdapter({
+				name: "webhook",
+				send: async (record) => {
+					const response = await fetch(config.webhook!.url, {
+						method: "POST",
+						headers: {
+							"content-type": "application/json",
+							...config.webhook?.headers,
+						},
+						body: JSON.stringify(record),
+					});
+					if (!response.ok) {
+						throw new Error(`webhook status=${response.status}`);
+					}
+				},
+			});
+			configured.push("webhook");
+		}
+		if (config.slack?.webhookUrl) {
+			this.registerChannelAdapter({
+				name: "slack",
+				send: async (record) => {
+					const response = await fetch(config.slack!.webhookUrl, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({
+							text: `[${record.severity}] ${record.topic}: ${record.message}`,
+						}),
+					});
+					if (!response.ok) {
+						throw new Error(`slack status=${response.status}`);
+					}
+				},
+			});
+			configured.push("slack");
+		}
+		if (config.email?.endpoint && config.email.to) {
+			this.registerChannelAdapter({
+				name: "email",
+				send: async (record) => {
+					const response = await fetch(config.email!.endpoint, {
+						method: "POST",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify({
+							to: config.email!.to,
+							from: config.email!.from,
+							subject: `[${record.severity}] ${record.topic}`,
+							text: record.message,
+						}),
+					});
+					if (!response.ok) {
+						throw new Error(`email status=${response.status}`);
+					}
+				},
+			});
+			configured.push("email");
+		}
+		return { configured };
+	}
+
 	updatePolicy(patch: NotificationPolicyPatch): ReturnType<NotificationService["getPolicy"]> {
 		if (patch.dedupeWindowMs !== undefined && patch.dedupeWindowMs >= 0) {
 			this.policy.dedupeWindowMs = patch.dedupeWindowMs;
@@ -598,6 +676,28 @@ export function createNotificationPolicyUpdateService(
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => ({
 			policy: notification.updatePolicy(req),
+		}),
+	};
+}
+
+export function createNotificationChannelConfigureService(
+	notification: NotificationService,
+): OSService<NotificationChannelsConfig, { configured: string[] }> {
+	return {
+		name: "notification.channel.configure",
+		requiredPermissions: ["notification:write"],
+		execute: async (req) => notification.configureChannels(req),
+	};
+}
+
+export function createNotificationChannelStatsService(
+	notification: NotificationService,
+): OSService<Record<string, never>, { channels: ReturnType<NotificationService["getChannelStats"]> }> {
+	return {
+		name: "notification.channel.stats",
+		requiredPermissions: ["notification:read"],
+		execute: async () => ({
+			channels: notification.getChannelStats(),
 		}),
 	};
 }
