@@ -2,6 +2,7 @@
 
 ## 实施状态（2026-03-06）
 - [x] M8(架构收敛)-1: 移除遗留模块 `src/bash` 与 `src/file-manager`，统一收口到 `shell-service` / `file-service`
+- [x] M8(架构收敛)-2: 清理未接入服务链的遗留 `config/core/utils` 孤岛模块，避免重复实现与发布污染
 - [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 128 passed, build: pass）
 - [x] M7(补缺)-11: 治理状态统一快照与恢复 `system.governance.state.export/import/persist/recover`
 - [x] M6(自治运维阶段)-1: 自动修复计划 `system.alerts.auto-remediate.plan`（规则化动作编排）

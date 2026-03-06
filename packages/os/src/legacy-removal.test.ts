@@ -18,8 +18,16 @@ describe("legacy module removal", () => {
 		const root = process.cwd();
 		const hasBash = await exists(join(root, "src", "bash"));
 		const hasFileManager = await exists(join(root, "src", "file-manager"));
+		const hasLegacyConfig = await exists(join(root, "src", "config.ts"));
+		const hasLegacySettings = await exists(join(root, "src", "core", "settings-manager.ts"));
+		const hasLegacyShellUtils = await exists(join(root, "src", "utils", "shell.ts"));
+		const hasLegacyToolsUtils = await exists(join(root, "src", "utils", "tools-manager.ts"));
 		expect(hasBash).toBe(false);
 		expect(hasFileManager).toBe(false);
+		expect(hasLegacyConfig).toBe(false);
+		expect(hasLegacySettings).toBe(false);
+		expect(hasLegacyShellUtils).toBe(false);
+		expect(hasLegacyToolsUtils).toBe(false);
 	});
 
 	it("does not expose legacy exports from package entry", () => {
