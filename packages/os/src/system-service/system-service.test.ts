@@ -16,6 +16,9 @@ import {
 	createSystemCapabilitiesListService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
+	createSystemErrorsKeysRotateService,
+	createSystemErrorsKeysListService,
+	createSystemErrorsKeysActivateService,
 	createSystemEventsService,
 	createSystemMetricsService,
 	createSystemAlertsService,
@@ -458,7 +461,7 @@ describe("SystemService", () => {
 		).rejects.toThrow();
 		const service = createSystemErrorsExportService(kernel, security);
 		const json = await service.execute(
-			{ format: "json", servicePrefix: "err.", signingSecret: "ek1" },
+			{ format: "json", servicePrefix: "err.", keyId: "default" },
 			{
 				appId: "app.demo",
 				sessionId: "s8-export",
@@ -468,7 +471,8 @@ describe("SystemService", () => {
 		);
 		expect(json.contentType).toBe("application/json");
 		expect(json.compressed).toBe(false);
-		expect(security.verify(json.content, "ek1", json.signature)).toBe(true);
+		expect(security.verify(json.content, "errors-export-secret", json.signature)).toBe(true);
+		expect(json.keyId).toBe("default");
 		expect(json.content).toContain("\"totalFailures\":1");
 		const csv = await service.execute(
 			{ format: "csv", servicePrefix: "err.", compress: true, signingSecret: "ek1" },
@@ -496,6 +500,26 @@ describe("SystemService", () => {
 				},
 			),
 		).rejects.toMatchObject({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>);
+	});
+
+	it("rotates and activates errors export signing keys", async () => {
+		const rotate = createSystemErrorsKeysRotateService();
+		const list = createSystemErrorsKeysListService();
+		const activate = createSystemErrorsKeysActivateService();
+		await rotate.execute(
+			{ keyId: "ek-2026-01", secret: "errors-secret-1", setActive: true },
+			{ appId: "app.demo", sessionId: "s8-keys", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const listed = await list.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s8-keys", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(listed.activeKeyId).toBe("ek-2026-01");
+		const switched = await activate.execute(
+			{ keyId: "default" },
+			{ appId: "app.demo", sessionId: "s8-keys", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(switched.activated).toBe(true);
 	});
 
 	it("evaluates policy decisions", async () => {

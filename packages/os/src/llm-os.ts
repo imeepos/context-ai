@@ -98,6 +98,9 @@ import {
 	createSystemDependenciesService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
+	createSystemErrorsKeysRotateService,
+	createSystemErrorsKeysListService,
+	createSystemErrorsKeysActivateService,
 	createSystemEventsService,
 	createSystemHealthService,
 	createSystemMetricsService,
@@ -396,6 +399,9 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	);
 	registerWhenEnabled("system.errors", () => createSystemErrorsService(kernel));
 	registerWhenEnabled("system.errors.export", () => createSystemErrorsExportService(kernel, securityService));
+	registerWhenEnabled("system.errors.keys.rotate", () => createSystemErrorsKeysRotateService());
+	registerWhenEnabled("system.errors.keys.list", () => createSystemErrorsKeysListService());
+	registerWhenEnabled("system.errors.keys.activate", () => createSystemErrorsKeysActivateService());
 
 	kernel.events.subscribe<{
 		service: string;

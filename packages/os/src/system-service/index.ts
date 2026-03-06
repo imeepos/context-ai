@@ -342,6 +342,7 @@ export interface SystemErrorsExportRequest extends SystemErrorsRequest {
 	format?: "json" | "csv";
 	compress?: boolean;
 	signingSecret?: string;
+	keyId?: string;
 }
 
 export interface SystemErrorsExportResponse {
@@ -350,6 +351,23 @@ export interface SystemErrorsExportResponse {
 	content: string;
 	compressed: boolean;
 	signature: string;
+	keyId: string;
+}
+
+interface ErrorsSigningKeyRecord {
+	keyId: string;
+	secret: string;
+	createdAt: string;
+}
+
+const errorsSigningKeys = new Map<string, ErrorsSigningKeyRecord>();
+let activeErrorsSigningKeyId = "default";
+if (!errorsSigningKeys.has(activeErrorsSigningKeyId)) {
+	errorsSigningKeys.set(activeErrorsSigningKeyId, {
+		keyId: activeErrorsSigningKeyId,
+		secret: "errors-export-secret",
+		createdAt: new Date().toISOString(),
+	});
 }
 
 export function createSystemErrorsService(
@@ -461,7 +479,13 @@ export function createSystemErrorsExportService(
 				throw new OSError("E_VALIDATION_FAILED", `Unsupported errors export format: ${format}`);
 			}
 			const response = await base.execute(filters, ctx);
-			const signingSecret = req.signingSecret ?? "errors-export-secret";
+			const selectedKeyId = req.signingSecret
+				? "adhoc"
+				: req.keyId && errorsSigningKeys.has(req.keyId)
+					? req.keyId
+					: activeErrorsSigningKeyId;
+			const signingSecret =
+				req.signingSecret ?? errorsSigningKeys.get(selectedKeyId)?.secret ?? "errors-export-secret";
 			const payload =
 				format === "csv"
 					? [
@@ -487,6 +511,7 @@ export function createSystemErrorsExportService(
 					content,
 					compressed: true,
 					signature: securityService.sign(content, signingSecret),
+					keyId: selectedKeyId,
 				};
 			}
 			if (format === "csv") {
@@ -496,6 +521,7 @@ export function createSystemErrorsExportService(
 					content: payload,
 					compressed: false,
 					signature: securityService.sign(payload, signingSecret),
+					keyId: selectedKeyId,
 				};
 			}
 			return {
@@ -504,7 +530,77 @@ export function createSystemErrorsExportService(
 				content: payload,
 				compressed: false,
 				signature: securityService.sign(payload, signingSecret),
+				keyId: selectedKeyId,
 			};
+		},
+	};
+}
+
+export function createSystemErrorsKeysRotateService(): OSService<
+	{
+		keyId: string;
+		secret: string;
+		setActive?: boolean;
+	},
+	{
+		activeKeyId: string;
+		keyIds: string[];
+	}
+> {
+	return {
+		name: "system.errors.keys.rotate",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			errorsSigningKeys.set(req.keyId, {
+				keyId: req.keyId,
+				secret: req.secret,
+				createdAt: new Date().toISOString(),
+			});
+			if (req.setActive !== false) {
+				activeErrorsSigningKeyId = req.keyId;
+			}
+			return {
+				activeKeyId: activeErrorsSigningKeyId,
+				keyIds: [...errorsSigningKeys.keys()],
+			};
+		},
+	};
+}
+
+export function createSystemErrorsKeysListService(): OSService<
+	Record<string, never>,
+	{
+		activeKeyId: string;
+		keys: Array<{ keyId: string; createdAt: string; isActive: boolean }>;
+	}
+> {
+	return {
+		name: "system.errors.keys.list",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			activeKeyId: activeErrorsSigningKeyId,
+			keys: [...errorsSigningKeys.values()].map((item) => ({
+				keyId: item.keyId,
+				createdAt: item.createdAt,
+				isActive: item.keyId === activeErrorsSigningKeyId,
+			})),
+		}),
+	};
+}
+
+export function createSystemErrorsKeysActivateService(): OSService<
+	{ keyId: string },
+	{ activated: boolean; activeKeyId: string }
+> {
+	return {
+		name: "system.errors.keys.activate",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			if (errorsSigningKeys.has(req.keyId)) {
+				activeErrorsSigningKeyId = req.keyId;
+				return { activated: true, activeKeyId: activeErrorsSigningKeyId };
+			}
+			return { activated: false, activeKeyId: activeErrorsSigningKeyId };
 		},
 	};
 }
