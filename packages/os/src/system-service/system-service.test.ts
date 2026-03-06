@@ -18,6 +18,7 @@ import {
 	createSystemCapabilitiesListService,
 	createSystemAppInstallReportService,
 	createSystemAppDeltaService,
+	createSystemRoutesService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
 	createSystemErrorsKeysRotateService,
@@ -256,6 +257,39 @@ describe("SystemService", () => {
 		);
 		expect(deltaOne.apps).toHaveLength(1);
 		expect(deltaOne.apps[0]?.appId).toBe("todo");
+	});
+
+	it("returns route registry snapshot", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:read"],
+		});
+		const service = createSystemRoutesService(manager);
+		const response = await service.execute(
+			{ appId: "todo" },
+			{
+				appId: "app.demo",
+				sessionId: "s6-routes",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.routes).toContain("todo://list");
 	});
 
 	it("returns all capabilities map", async () => {

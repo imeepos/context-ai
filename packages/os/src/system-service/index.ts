@@ -39,6 +39,26 @@ export interface SystemDependenciesResponse {
 	graph: Record<string, string[]>;
 }
 
+export interface SystemRoutesRequest {
+	appId?: string;
+}
+
+export interface SystemRoutesResponse {
+	routes: string[];
+}
+
+export function createSystemRoutesService(
+	appManager: AppManager,
+): OSService<SystemRoutesRequest, SystemRoutesResponse> {
+	return {
+		name: "system.routes",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => ({
+			routes: appManager.routes.listRoutes(req.appId),
+		}),
+	};
+}
+
 export interface SystemAppInstallReportRequest {
 	appId: string;
 }
