@@ -289,8 +289,23 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 			},
 		}),
 	);
-	registerWhenEnabled("app.install.rollback", () => createAppInstallRollbackService(appManager));
-	registerWhenEnabled("app.install.v1", () => createAppInstallV1Service(appManager, securityService));
+	registerWhenEnabled("app.install.rollback", () =>
+		createAppInstallRollbackService(appManager, {
+			onInstall: (manifest) => {
+				kernel.capabilities.set(manifest.id, manifest.permissions);
+			},
+			onUninstall: (appId) => {
+				kernel.capabilities.remove(appId);
+			},
+		}),
+	);
+	registerWhenEnabled("app.install.v1", () =>
+		createAppInstallV1Service(appManager, securityService, {
+			onInstall: (manifest) => {
+				kernel.capabilities.set(manifest.id, manifest.permissions);
+			},
+		}),
+	);
 	registerWhenEnabled("app.state.set", () => createAppSetStateService(appManager));
 	registerWhenEnabled("app.list", () => createAppListService(appManager));
 	registerWhenEnabled("app.page.render", () =>

@@ -96,6 +96,8 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
+			const v1Caps = await os.kernel.execute("system.capabilities", { appId: "app.v1" }, context);
+			expect(v1Caps.capabilities).toContain("app:read");
 
 			const notesInstall = await os.kernel.execute(
 				"app.install",
@@ -116,6 +118,8 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(notesRollback.uninstalled).toBe(true);
+			const capsAfterRollback = await os.kernel.execute("system.capabilities.list", {}, context);
+			expect(capsAfterRollback.capabilitiesByApp["app.notes"]).toBeUndefined();
 			const apps = await os.kernel.execute("app.list", { _: "list" }, context);
 			expect(apps.apps).toHaveLength(2);
 			const installEvents = await os.kernel.execute("notification.list", { topic: "system.app.install", limit: 10 }, context);

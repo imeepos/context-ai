@@ -222,6 +222,7 @@ export function createAppInstallService(
 
 export function createAppInstallRollbackService(
 	manager: AppManager,
+	hooks?: AppServiceHooks,
 ): OSService<AppInstallRollbackRequest, { ok: true; restoredVersion?: string; uninstalled: boolean }> {
 	return {
 		name: "app.install.rollback",
@@ -233,6 +234,7 @@ export function createAppInstallRollbackService(
 			}
 			if (snapshot.previous) {
 				manager.install(snapshot.previous);
+				hooks?.onInstall?.(snapshot.previous);
 				return {
 					ok: true,
 					restoredVersion: snapshot.previous.version,
@@ -240,6 +242,7 @@ export function createAppInstallRollbackService(
 				};
 			}
 			manager.uninstall(req.appId);
+			hooks?.onUninstall?.(req.appId);
 			return {
 				ok: true,
 				uninstalled: true,
@@ -272,8 +275,9 @@ function buildManifestSigningPayload(manifest: AppManifestV1): string {
 export function createAppInstallV1Service(
 	manager: AppManager,
 	securityService: SecurityService,
+	hooks?: AppServiceHooks,
 ): OSService<AppInstallV1Request, { ok: true; report: AppInstallDeltaReport }> {
-	const baseInstall = createAppInstallService(manager);
+	const baseInstall = createAppInstallService(manager, hooks);
 	return {
 		name: "app.install.v1",
 		requiredPermissions: ["app:manage"],
