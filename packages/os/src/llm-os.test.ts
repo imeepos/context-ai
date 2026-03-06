@@ -923,6 +923,81 @@ describe("createDefaultLLMOS", () => {
 		}
 	});
 
+	it("persists and recovers rollback state in default os flow", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-kernel-rollback-state-"));
+		try {
+			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
+			const context = {
+				appId: "app.up",
+				sessionId: "session-rollback-state",
+				permissions: ["app:manage", "app:read", "system:read", "system:write"],
+				workingDirectory: root,
+			};
+			await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "app.up",
+						name: "Up",
+						version: "1.0.0",
+						entry: "index.js",
+						permissions: ["app:manage", "app:read", "system:read", "system:write"],
+					},
+				},
+				context,
+			);
+			const upgraded = await os.kernel.execute(
+				"app.install",
+				{
+					manifest: {
+						id: "app.up",
+						name: "Up",
+						version: "1.1.0",
+						entry: {
+							pages: [
+								{
+									id: "v2",
+									route: "app.up://v2",
+									name: "V2",
+									description: "V2 page",
+									path: "v2.js",
+									default: true,
+								},
+							],
+						},
+						permissions: ["app:manage", "app:read", "system:read", "system:write"],
+					},
+				},
+				context,
+			);
+			await os.kernel.execute("system.app.rollback.state.persist", {}, context);
+
+			await os.kernel.execute(
+				"system.app.rollback.state.import",
+				{
+					state: {
+						snapshots: [],
+						installReports: [],
+					},
+				},
+				context,
+			);
+			const recoveredState = await os.kernel.execute("system.app.rollback.state.recover", {}, context);
+			expect(recoveredState.recovered).toBe(true);
+			const rolled = await os.kernel.execute(
+				"app.install.rollback",
+				{
+					appId: "app.up",
+					rollbackToken: upgraded.report.rollbackToken,
+				},
+				context,
+			);
+			expect(rolled.restoredVersion).toBe("1.0.0");
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
 	it("caps net journal size by configured limit", async () => {
 		const root = await mkdtemp(join(tmpdir(), "os-kernel-net-journal-"));
 		try {

@@ -224,6 +224,38 @@ export class AppManager {
 		}
 	}
 
+	listRollbackSnapshots(appId?: string): Array<{
+		token: string;
+		appId: string;
+		createdAt: string;
+		expiresAt: string;
+	}> {
+		return [...this.rollbackSnapshots.entries()]
+			.filter(([, snapshot]) => !appId || snapshot.appId === appId)
+			.map(([token, snapshot]) => ({
+				token,
+				appId: snapshot.appId,
+				createdAt: snapshot.createdAt,
+				expiresAt: snapshot.expiresAt,
+			}));
+	}
+
+	garbageCollectExpiredRollbackSnapshots(now = Date.now()): { scanned: number; removed: number } {
+		const entries = [...this.rollbackSnapshots.entries()];
+		let removed = 0;
+		for (const [token, snapshot] of entries) {
+			const expiresAt = Date.parse(snapshot.expiresAt);
+			if (!Number.isNaN(expiresAt) && expiresAt <= now) {
+				this.rollbackSnapshots.delete(token);
+				removed += 1;
+			}
+		}
+		return {
+			scanned: entries.length,
+			removed,
+		};
+	}
+
 	private pruneRollbackSnapshots(appId: string): void {
 		const tokensForApp = [...this.rollbackSnapshots.entries()]
 			.filter(([, snapshot]) => snapshot.appId === appId)

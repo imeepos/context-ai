@@ -22,6 +22,8 @@ import {
 	createSystemAppRollbackStateImportService,
 	createSystemAppRollbackStatePersistService,
 	createSystemAppRollbackStateRecoverService,
+	createSystemAppRollbackStatsService,
+	createSystemAppRollbackGCService,
 	createSystemRoutesService,
 	createSystemRoutesStatsService,
 	createSystemErrorsService,
@@ -439,6 +441,54 @@ describe("SystemService", () => {
 		);
 		expect(recovered.recovered).toBe(true);
 		expect(recoverManager.getInstallReport("todo")?.version).toBe("1.0.0");
+	});
+
+	it("returns rollback stats and supports gc", async () => {
+		const manager = new AppManager();
+		manager.setRollbackSnapshot("t-expired", {
+			appId: "todo",
+			createdAt: "2020-01-01T00:00:00.000Z",
+			expiresAt: "2020-01-01T00:00:01.000Z",
+		});
+		manager.setRollbackSnapshot("t-active", {
+			appId: "todo",
+			createdAt: new Date().toISOString(),
+			expiresAt: new Date(Date.now() + 60_000).toISOString(),
+		});
+		const statsService = createSystemAppRollbackStatsService(manager);
+		const before = await statsService.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-gc",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(before.totalSnapshots).toBe(2);
+		expect(before.expiredSnapshots).toBe(1);
+		const gcService = createSystemAppRollbackGCService(manager);
+		const gc = await gcService.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-gc",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(gc.removed).toBeGreaterThan(0);
+		const after = await statsService.execute(
+			{},
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-gc",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(after.totalSnapshots).toBe(1);
+		expect(after.expiredSnapshots).toBe(0);
 	});
 
 	it("returns route registry snapshot", async () => {
