@@ -213,25 +213,33 @@ export class AppManager {
 		if (!Array.isArray(input.installReports)) {
 			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: installReports must be array");
 		}
-		this.rollbackSnapshots.clear();
-		this.installReports.clear();
-		for (const snapshot of input.snapshots ?? []) {
+		const snapshots = (input.snapshots ?? []).map((snapshot) => {
 			validateRollbackSnapshot(snapshot);
-			this.setRollbackSnapshot(snapshot.token, {
+			return {
+				token: snapshot.token,
 				appId: snapshot.appId,
 				previous: snapshot.previous,
 				previousQuota: snapshot.previousQuota,
 				createdAt: snapshot.createdAt,
 				expiresAt: snapshot.expiresAt,
-			});
-		}
-		for (const state of input.installReports ?? []) {
+			};
+		});
+		const reports = (input.installReports ?? []).map((state) => {
 			validateInstallReportState(state);
-			this.installReports.set(state.report.appId, {
+			return {
 				report: { ...state.report },
 				lastAction: state.lastAction,
 				updatedAt: state.updatedAt,
-			});
+			};
+		});
+
+		this.rollbackSnapshots.clear();
+		this.installReports.clear();
+		for (const snapshot of snapshots) {
+			this.setRollbackSnapshot(snapshot.token, snapshot);
+		}
+		for (const reportState of reports) {
+			this.installReports.set(reportState.report.appId, reportState);
 		}
 	}
 

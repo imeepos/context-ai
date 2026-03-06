@@ -1017,8 +1017,27 @@ describe("AppManager", () => {
 		expect(next.exportRollbackState().snapshots.length).toBeGreaterThan(0);
 	});
 
-	it("rejects invalid rollback state on import", () => {
+	it("rejects invalid rollback state on import and keeps existing state", async () => {
 		const manager = new AppManager();
+		const install = createAppInstallService(manager);
+		await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.0.0",
+					entry: "index.js",
+					permissions: ["app:manage"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-import-atomic",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const before = manager.exportRollbackState();
 		expect(() =>
 			manager.importRollbackState({
 				snapshots: [
@@ -1032,6 +1051,9 @@ describe("AppManager", () => {
 				installReports: [],
 			}),
 		).toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+		const after = manager.exportRollbackState();
+		expect(after.installReports.length).toBe(before.installReports.length);
+		expect(after.snapshots.length).toBe(before.snapshots.length);
 	});
 
 	it("supports v1 install with signature verification", async () => {
