@@ -32,6 +32,7 @@ import {
 	createSystemAlertsHotspotsService,
 	createSystemAlertsRecommendationsService,
 	createSystemAlertsFeedService,
+	createSystemAlertsBreachesService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -834,5 +835,40 @@ describe("SystemService", () => {
 		expect(response.items).toHaveLength(2);
 		expect(response.items[0]?.message).toBe("f3");
 		expect(response.hasMore).toBe(true);
+	});
+
+	it("returns alert governance breaches by thresholds", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "cache fail", severity: "critical" });
+		const first = notification.query({ topic: "system.alert", limit: 1 })[0];
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
+		if (first) {
+			notification.ack({ id: first.id });
+		}
+
+		const service = createSystemAlertsBreachesService(notification);
+		const response = await service.execute(
+			{
+				windowMinutes: 10,
+				criticalThreshold: 1,
+				unackedThreshold: 0,
+				ackP95ThresholdMs: 5000,
+				topic: "system.alert",
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s30",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.breaches.length).toBeGreaterThan(0);
+		expect(response.breaches.some((b) => b.metric === "critical_count")).toBe(true);
+		expect(response.breaches.some((b) => b.metric === "ack_p95_ms")).toBe(true);
+		vi.useRealTimers();
 	});
 });
