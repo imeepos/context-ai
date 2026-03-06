@@ -296,6 +296,12 @@ export interface AppServiceHooks {
 	onInstall?: (manifest: AppManifest) => void;
 	onUninstall?: (appId: string) => void;
 	onUpgrade?: (manifest: AppManifest) => void;
+	onRollback?: (input: {
+		appId: string;
+		rollbackToken: string;
+		restoredVersion?: string;
+		uninstalled: boolean;
+	}) => void;
 }
 
 export interface AppPageRenderer {
@@ -385,6 +391,12 @@ export function createAppInstallRollbackService(
 					rollbackToken: req.rollbackToken,
 				}, "rollback");
 				hooks?.onInstall?.(snapshot.previous);
+				hooks?.onRollback?.({
+					appId: req.appId,
+					rollbackToken: req.rollbackToken,
+					restoredVersion: snapshot.previous.version,
+					uninstalled: false,
+				});
 				return {
 					ok: true,
 					restoredVersion: snapshot.previous.version,
@@ -393,6 +405,11 @@ export function createAppInstallRollbackService(
 			}
 			manager.uninstall(req.appId);
 			hooks?.onUninstall?.(req.appId);
+			hooks?.onRollback?.({
+				appId: req.appId,
+				rollbackToken: req.rollbackToken,
+				uninstalled: true,
+			});
 			return {
 				ok: true,
 				uninstalled: true,

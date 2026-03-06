@@ -118,6 +118,12 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(notesRollback.uninstalled).toBe(true);
+			const rollbackEvents = await os.kernel.execute(
+				"notification.list",
+				{ topic: "system.app.rollback", limit: 10 },
+				context,
+			);
+			expect(rollbackEvents.notifications.length).toBeGreaterThan(0);
 			const capsAfterRollback = await os.kernel.execute("system.capabilities.list", {}, context);
 			expect(capsAfterRollback.capabilitiesByApp["app.notes"]).toBeUndefined();
 			const apps = await os.kernel.execute("app.list", { _: "list" }, context);

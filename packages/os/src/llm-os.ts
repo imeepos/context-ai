@@ -301,6 +301,16 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 			onUninstall: (appId) => {
 				kernel.capabilities.remove(appId);
 			},
+			onRollback: (input) => {
+				kernel.events.publish("system.app.rollback", input);
+				notificationService.send({
+					topic: "system.app.rollback",
+					severity: "warning",
+					message: input.uninstalled
+						? `app rollback removed ${input.appId} token=${input.rollbackToken}`
+						: `app rollback restored ${input.appId}@${input.restoredVersion} token=${input.rollbackToken}`,
+				});
+			},
 		}),
 	);
 	registerWhenEnabled("app.install.v1", () =>
