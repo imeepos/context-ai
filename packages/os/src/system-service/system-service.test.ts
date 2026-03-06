@@ -23,6 +23,7 @@ import {
 	createSystemAlertsPolicyService,
 	createSystemAlertsTrendsService,
 	createSystemAlertsSLOService,
+	createSystemAlertsIncidentsService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -592,5 +593,31 @@ describe("SystemService", () => {
 		expect(response.ackedCount).toBe(1);
 		expect(response.avgAckLatencyMs).toBe(10000);
 		vi.useRealTimers();
+	});
+
+	it("returns grouped unacked alert incidents", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "disk high", severity: "warning" });
+		const first = notification.query({ topic: "system.alert", severity: "critical", limit: 1 })[0];
+		if (first) {
+			notification.ack({ id: first.id });
+		}
+
+		const service = createSystemAlertsIncidentsService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert" },
+			{
+				appId: "app.demo",
+				sessionId: "s21",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.totalIncidents).toBe(2);
+		const dbIncident = response.incidents.find((item) => item.message === "db down");
+		expect(dbIncident?.count).toBe(1);
 	});
 });
