@@ -971,6 +971,8 @@ describe("createDefaultLLMOS", () => {
 			);
 			const rendered = await os.kernel.execute("app.page.render", { route: "todo://list" }, context);
 			expect(typeof rendered.prompt).toBe("string");
+			const renderedQuick = await os.kernel.execute("render", { route: "todo://list" }, context);
+			expect(renderedQuick.page.route).toBe("todo://list");
 			const started = await os.kernel.execute("app.start", { appId: "todo" }, context);
 			expect(started.route).toBe("todo://list");
 			const selected = await os.kernel.execute(

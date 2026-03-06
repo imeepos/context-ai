@@ -307,8 +307,43 @@ export function createAppPageRenderService(
 		metadata?: Record<string, string>;
 	}
 > {
+	return createRouteRenderService("app.page.render", manager, renderer);
+}
+
+export function createRenderService(
+	manager: AppManager,
+	renderer: AppPageRenderer,
+): OSService<
+	{ route: string },
+	{
+		appId: string;
+		page: AppPageEntry;
+		prompt: string;
+		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
+		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
+		metadata?: Record<string, string>;
+	}
+> {
+	return createRouteRenderService("render", manager, renderer);
+}
+
+function createRouteRenderService(
+	name: "app.page.render" | "render",
+	manager: AppManager,
+	renderer: AppPageRenderer,
+): OSService<
+	{ route: string },
+	{
+		appId: string;
+		page: AppPageEntry;
+		prompt: string;
+		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
+		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
+		metadata?: Record<string, string>;
+	}
+> {
 	return {
-		name: "app.page.render",
+		name,
 		requiredPermissions: ["app:read"],
 		execute: async (req, ctx) => {
 			const resolved = manager.routes.resolve(req.route);

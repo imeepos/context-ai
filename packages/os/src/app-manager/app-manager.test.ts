@@ -5,6 +5,7 @@ import {
 	createAppInstallService,
 	createAppInstallV1Service,
 	createAppPageRenderService,
+	createRenderService,
 	createRuntimeRiskConfirmService,
 	createRuntimeToolsValidateService,
 } from "./index.js";
@@ -197,6 +198,45 @@ describe("AppManager", () => {
 		expect(result.tools[0]?.name).toBe("todo.list");
 		const stats = manager.routes.stats("todo");
 		expect(stats[0]?.success).toBeGreaterThan(0);
+	});
+
+	it("supports quick render alias service", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		const service = createRenderService(manager, {
+			render: async ({ appId, page }) => ({
+				prompt: `render:${appId}:${page.route}`,
+				tools: [{ name: "todo.list" }],
+			}),
+		});
+		const result = await service.execute(
+			{ route: "todo://list" },
+			{
+				appId: "todo",
+				sessionId: "s-render-quick",
+				permissions: ["app:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(result.page.route).toBe("todo://list");
+		expect(result.tools[0]?.name).toBe("todo.list");
 	});
 
 	it("starts app with default page when route is omitted", async () => {

@@ -6,6 +6,7 @@ import {
 	createAppInstallService,
 	createAppListService,
 	createAppPageRenderService,
+	createRenderService,
 	createAppStartService,
 	createRuntimeRiskConfirmService,
 	createRuntimeToolsValidateService,
@@ -293,6 +294,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("app.page.render", () =>
 		createAppPageRenderService(appManager, appPageRenderer),
 	);
+	registerWhenEnabled("render", () => createRenderService(appManager, appPageRenderer));
 	registerWhenEnabled("app.start", () => createAppStartService(appManager, appPageRenderer));
 	registerWhenEnabled("runtime.tools.validate", () => createRuntimeToolsValidateService(appManager));
 	registerWhenEnabled("runtime.risk.confirm", () => createRuntimeRiskConfirmService());
