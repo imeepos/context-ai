@@ -7,7 +7,7 @@ import { PolicyEngine } from "../kernel/policy-engine.js";
 import type { OSContext } from "../types/os.js";
 import { NetService } from "../net-service/index.js";
 import { NotificationService } from "../notification-service/index.js";
-import { SchedulerService } from "../scheduler-service/index.js";
+import { SchedulerService, StoreSchedulerStateAdapter } from "../scheduler-service/index.js";
 import { SecurityService } from "../security-service/index.js";
 import { StoreService } from "../store-service/index.js";
 
@@ -343,6 +343,34 @@ describe("SchedulerService", () => {
 		const restored = new SchedulerService(bus);
 		const restoredResult = restored.restoreState(snapshot);
 		expect(restoredResult.restoredTasks).toBe(1);
+		await vi.advanceTimersByTimeAsync(120);
+		expect(fired).toBe(1);
+		vi.useRealTimers();
+	});
+
+	it("persists and recovers state via store adapter", async () => {
+		vi.useFakeTimers();
+		const store = new StoreService();
+		const adapter = new StoreSchedulerStateAdapter(store);
+		const scheduler = new SchedulerService(undefined, {
+			storage: adapter,
+			autoPersist: true,
+		});
+		scheduler.scheduleEventOnce("persist-store-1", 100, "demo.store", { ok: true });
+		const persisted = scheduler.persistState();
+		expect(persisted.persisted).toBe(true);
+
+		const restoredBus = new EventBus();
+		let fired = 0;
+		restoredBus.subscribe("demo.store", () => {
+			fired += 1;
+		});
+		const recovered = new SchedulerService(restoredBus, {
+			storage: adapter,
+		});
+		const recoveredState = recovered.recoverState();
+		expect(recoveredState.recovered).toBe(true);
+		expect(recoveredState.restoredTasks).toBe(1);
 		await vi.advanceTimersByTimeAsync(120);
 		expect(fired).toBe(1);
 		vi.useRealTimers();

@@ -361,6 +361,10 @@ describe("createDefaultLLMOS", () => {
 			expect(chaos.passed).toBe(true);
 			const schedulerState = await os.kernel.execute("scheduler.state.export", {}, context);
 			expect(Array.isArray(schedulerState.tasks)).toBe(true);
+			const schedulerPersist = await os.kernel.execute("scheduler.state.persist", {}, context);
+			expect(typeof schedulerPersist.persisted).toBe("boolean");
+			const schedulerRecover = await os.kernel.execute("scheduler.state.recover", {}, context);
+			expect(typeof schedulerRecover.recovered).toBe("boolean");
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(

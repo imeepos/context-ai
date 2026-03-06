@@ -36,12 +36,53 @@ export interface SchedulerPersistedTask {
 	runs?: number;
 }
 
+export interface SchedulerStateSnapshot {
+	tasks: SchedulerPersistedTask[];
+	failures: SchedulerFailureRecord[];
+}
+
+export interface SchedulerStateStorageAdapter {
+	load(): SchedulerStateSnapshot | undefined;
+	save(snapshot: SchedulerStateSnapshot): void;
+}
+
+export class StoreSchedulerStateAdapter implements SchedulerStateStorageAdapter {
+	constructor(
+		private readonly store: {
+			get(key: string): unknown;
+			set(key: string, value: unknown): void;
+		},
+		private readonly key = "scheduler.state",
+	) {}
+
+	load(): SchedulerStateSnapshot | undefined {
+		const value = this.store.get(this.key);
+		if (!value || typeof value !== "object") return undefined;
+		const snapshot = value as Partial<SchedulerStateSnapshot>;
+		if (!Array.isArray(snapshot.tasks) || !Array.isArray(snapshot.failures)) return undefined;
+		return {
+			tasks: snapshot.tasks as SchedulerPersistedTask[],
+			failures: snapshot.failures as SchedulerFailureRecord[],
+		};
+	}
+
+	save(snapshot: SchedulerStateSnapshot): void {
+		this.store.set(this.key, snapshot);
+	}
+}
+
 export class SchedulerService {
 	private readonly tasks = new Map<string, TaskHandle>();
 	private readonly failures: SchedulerFailureRecord[] = [];
 	private readonly retryableDefinitions = new Map<string, RetryableTaskDefinition>();
 	private readonly persistedTasks = new Map<string, SchedulerPersistedTask>();
-	constructor(private readonly eventBus?: EventBus) {}
+	constructor(
+		private readonly eventBus?: EventBus,
+		private readonly options?: {
+			storage?: SchedulerStateStorageAdapter;
+			autoPersist?: boolean;
+		},
+	) {}
 
 	publishEvent(topic: string, payload?: unknown): void {
 		this.eventBus?.publish(topic, payload ?? null);
@@ -65,6 +106,7 @@ export class SchedulerService {
 			return { id, name: "interval" };
 		}
 		this.tasks.set(id, { stop: () => clearInterval(timer) });
+		this.persistIfNeeded();
 		return { id, name: "interval" };
 	}
 
@@ -75,6 +117,7 @@ export class SchedulerService {
 			this.tasks.delete(id);
 		}, delayMs);
 		this.tasks.set(id, { stop: () => clearTimeout(timer) });
+		this.persistIfNeeded();
 		return { id, name: "timeout" };
 	}
 
@@ -87,9 +130,11 @@ export class SchedulerService {
 			payload,
 			runAt: new Date(runAt).toISOString(),
 		});
+		this.persistIfNeeded();
 		return this.scheduleOnce(id, delayMs, () => {
 			this.publishEvent(topic, payload);
 			this.persistedTasks.delete(id);
+			this.persistIfNeeded();
 		});
 	}
 
@@ -110,6 +155,7 @@ export class SchedulerService {
 			maxRuns: options?.maxRuns,
 			runs: 0,
 		});
+		this.persistIfNeeded();
 		return this.scheduleInterval(
 			id,
 			intervalMs,
@@ -120,6 +166,7 @@ export class SchedulerService {
 				if (entry) {
 					entry.runs = runs;
 					this.persistedTasks.set(id, entry);
+					this.persistIfNeeded();
 				}
 			},
 			options,
@@ -132,6 +179,7 @@ export class SchedulerService {
 		task.stop();
 		this.tasks.delete(id);
 		this.persistedTasks.delete(id);
+		this.persistIfNeeded();
 		return true;
 	}
 
@@ -149,13 +197,15 @@ export class SchedulerService {
 	clearFailures(id?: string): number {
 		if (!id) {
 			const count = this.failures.length;
-			this.failures.length = 0;
-			return count;
-		}
+		this.failures.length = 0;
+		this.persistIfNeeded();
+		return count;
+	}
 		const before = this.failures.length;
 		const retained = this.failures.filter((item) => item.id !== id);
 		this.failures.length = 0;
 		this.failures.push(...retained);
+		this.persistIfNeeded();
 		return before - retained.length;
 	}
 
@@ -168,6 +218,7 @@ export class SchedulerService {
 		this.clearFailures(id);
 		this.scheduleRetryable(id, definition.task, definition.options);
 		this.eventBus?.publish("scheduler.task.replayed", { id });
+		this.persistIfNeeded();
 		return true;
 	}
 
@@ -218,6 +269,7 @@ export class SchedulerService {
 					void run(attempt + 1);
 				}, options.backoffMs * (attempt + 1));
 				this.tasks.set(id, { stop: () => clearTimeout(timer) });
+				this.persistIfNeeded();
 			}
 		};
 
@@ -230,6 +282,7 @@ export class SchedulerService {
 				clearTimeout(firstTimer);
 			},
 		});
+		this.persistIfNeeded();
 		return { id, name: "retryable" };
 	}
 
@@ -273,6 +326,37 @@ export class SchedulerService {
 			restoredFailures = snapshot.failures.length;
 		}
 		return { restoredTasks, restoredFailures };
+	}
+
+	persistState(): { persisted: boolean; tasks: number; failures: number } {
+		if (!this.options?.storage) {
+			return { persisted: false, tasks: this.persistedTasks.size, failures: this.failures.length };
+		}
+		const snapshot = this.exportState();
+		this.options.storage.save(snapshot);
+		return { persisted: true, tasks: snapshot.tasks.length, failures: snapshot.failures.length };
+	}
+
+	recoverState(): { recovered: boolean; restoredTasks: number; restoredFailures: number } {
+		if (!this.options?.storage) {
+			return { recovered: false, restoredTasks: 0, restoredFailures: 0 };
+		}
+		const snapshot = this.options.storage.load();
+		if (!snapshot) {
+			return { recovered: true, restoredTasks: 0, restoredFailures: 0 };
+		}
+		const restored = this.restoreState(snapshot);
+		return {
+			recovered: true,
+			restoredTasks: restored.restoredTasks,
+			restoredFailures: restored.restoredFailures,
+		};
+	}
+
+	private persistIfNeeded(): void {
+		if (this.options?.autoPersist) {
+			this.persistState();
+		}
 	}
 }
 
@@ -379,6 +463,26 @@ export function createSchedulerStateImportService(
 		name: "scheduler.state.import",
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => scheduler.restoreState(req),
+	};
+}
+
+export function createSchedulerStatePersistService(
+	scheduler: SchedulerService,
+): OSService<Record<string, never>, { persisted: boolean; tasks: number; failures: number }> {
+	return {
+		name: "scheduler.state.persist",
+		requiredPermissions: ["scheduler:write"],
+		execute: async () => scheduler.persistState(),
+	};
+}
+
+export function createSchedulerStateRecoverService(
+	scheduler: SchedulerService,
+): OSService<Record<string, never>, { recovered: boolean; restoredTasks: number; restoredFailures: number }> {
+	return {
+		name: "scheduler.state.recover",
+		requiredPermissions: ["scheduler:write"],
+		execute: async () => scheduler.recoverState(),
 	};
 }
 

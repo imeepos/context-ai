@@ -52,6 +52,9 @@ import {
 	createSchedulerScheduleOnceService,
 	createSchedulerStateExportService,
 	createSchedulerStateImportService,
+	createSchedulerStatePersistService,
+	createSchedulerStateRecoverService,
+	StoreSchedulerStateAdapter,
 } from "./scheduler-service/index.js";
 import { SecurityService, createSecurityRedactService } from "./security-service/index.js";
 import {
@@ -186,7 +189,13 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		const next = [...existing, serializedEntry];
 		storeService.set(key, next.slice(-journalLimit));
 	});
-	const schedulerService = new SchedulerService(kernel.events);
+	const schedulerService = new SchedulerService(
+		kernel.events,
+		{
+			storage: new StoreSchedulerStateAdapter(storeService),
+			autoPersist: true,
+		},
+	);
 	const notificationService = new NotificationService(kernel.events, {
 		dedupeWindowMs: options.notificationDedupeWindowMs,
 		rateLimit: options.notificationRateLimit,
@@ -260,6 +269,8 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("scheduler.failures.replay", () => createSchedulerFailuresReplayService(schedulerService));
 	registerWhenEnabled("scheduler.state.export", () => createSchedulerStateExportService(schedulerService));
 	registerWhenEnabled("scheduler.state.import", () => createSchedulerStateImportService(schedulerService));
+	registerWhenEnabled("scheduler.state.persist", () => createSchedulerStatePersistService(schedulerService));
+	registerWhenEnabled("scheduler.state.recover", () => createSchedulerStateRecoverService(schedulerService));
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
 	registerWhenEnabled("notification.ack", () => createNotificationAckService(notificationService));
 	registerWhenEnabled("notification.ackAll", () => createNotificationAckAllService(notificationService));
