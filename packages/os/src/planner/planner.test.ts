@@ -166,4 +166,57 @@ describe("PlannerRuntime", () => {
 		expect(response.failures).toHaveLength(1);
 		expect(response.results.some((item) => item.route === "calendar://events" && item.recovered)).toBe(true);
 	});
+
+	it("denies high-risk execution without valid approval", async () => {
+		const manager = createManager();
+		const model = new ModelService();
+		model.register({
+			name: "echo",
+			generate: async () => "ok",
+		});
+		const service = createRunnerExecutePlanService(
+			manager,
+			{
+				render: async ({ page }) => ({
+					prompt: `page:${page.route}`,
+					tools: [{ name: `${page.id}.tool` }],
+				}),
+			},
+			model,
+		);
+		await expect(
+			service.execute(
+				{
+					text: "danger op",
+					routes: ["todo://list"],
+					risk: { level: "high", approved: true, approver: "ops" },
+				},
+				{
+					appId: "todo",
+					sessionId: "s-runner-risk",
+					permissions: ["app:read", "model:invoke"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toThrow();
+		const allowed = await service.execute(
+			{
+				text: "danger op",
+				routes: ["todo://list"],
+				risk: {
+					level: "high",
+					approved: true,
+					approver: "ops",
+					approvalExpiresAt: new Date(Date.now() + 60_000).toISOString(),
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-runner-risk",
+				permissions: ["app:read", "model:invoke"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(allowed.steps).toBeGreaterThan(0);
+	});
 });

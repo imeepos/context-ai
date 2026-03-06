@@ -38,6 +38,12 @@ export interface RunnerExecutePlanRequest {
 	stopCondition?: string;
 	maxRetries?: number;
 	fallbackRoute?: string;
+	risk?: {
+		level: "low" | "medium" | "high";
+		approved?: boolean;
+		approver?: string;
+		approvalExpiresAt?: string;
+	};
 }
 
 export interface RunnerExecutePlanResponse {
@@ -155,6 +161,17 @@ export function createRunnerExecutePlanService(
 		name: "runner.executePlan",
 		requiredPermissions: ["app:read", "model:invoke"],
 		execute: async (req, ctx) => {
+			if (req.risk && req.risk.level !== "low") {
+				if (!req.risk.approved || !req.risk.approver?.trim()) {
+					throw new Error("E_POLICY_DENIED: execution approval required");
+				}
+				if (req.risk.level === "high") {
+					const expiresAt = req.risk.approvalExpiresAt ? Date.parse(req.risk.approvalExpiresAt) : Number.NaN;
+					if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) {
+						throw new Error("E_POLICY_DENIED: execution approval expired");
+					}
+				}
+			}
 			const maxSteps = req.maxSteps && req.maxSteps > 0 ? req.maxSteps : req.routes.length;
 			const stopCondition = req.stopCondition ?? "DONE";
 			const model = req.model ?? "echo";
