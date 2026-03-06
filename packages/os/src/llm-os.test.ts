@@ -212,6 +212,12 @@ describe("createDefaultLLMOS", () => {
 				);
 				expect(ack.acknowledged).toBe(1);
 			}
+			const ackAll = await os.kernel.execute(
+				"notification.ackAll",
+				{ topic: "system.alert" },
+				context,
+			);
+			expect(typeof ackAll.acknowledged).toBe("number");
 			const unacked = await os.kernel.execute("system.alerts.unacked", { topic: "system.alert" }, context);
 			expect(typeof unacked.total).toBe("number");
 			const clearedAlerts = await os.kernel.execute(

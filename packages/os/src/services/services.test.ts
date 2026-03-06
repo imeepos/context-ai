@@ -460,4 +460,18 @@ describe("NotificationService", () => {
 		expect(unacked).toHaveLength(1);
 		expect(unacked[0]?.message).toBe("m2");
 	});
+
+	it("acknowledges notifications in batch by filter", () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "m1", severity: "error" });
+		notification.send({ topic: "system.alert", message: "m2", severity: "warning" });
+		notification.send({ topic: "ops.alert", message: "m3", severity: "error" });
+		const acked = notification.ackAll({ topic: "system.alert" });
+		expect(acked).toBe(2);
+		const unackedSystem = notification.query({ topic: "system.alert", acknowledged: false });
+		expect(unackedSystem).toHaveLength(0);
+		const unackedOps = notification.query({ topic: "ops.alert", acknowledged: false });
+		expect(unackedOps).toHaveLength(1);
+	});
 });

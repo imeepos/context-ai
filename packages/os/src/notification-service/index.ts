@@ -54,6 +54,13 @@ export interface NotificationAckRequest {
 	id: string;
 }
 
+export interface NotificationAckAllRequest {
+	topic?: string;
+	severity?: NotificationSeverity;
+	since?: string;
+	until?: string;
+}
+
 export interface NotificationStats {
 	sent: number;
 	dropped: {
@@ -166,6 +173,26 @@ export class NotificationService {
 		let count = 0;
 		for (const record of this.sent) {
 			if (record.id === request.id && !record.acknowledged) {
+				record.acknowledged = true;
+				count += 1;
+			}
+		}
+		return count;
+	}
+
+	ackAll(request: NotificationAckAllRequest): number {
+		const targetIds = new Set(
+			this.query({
+				topic: request.topic,
+				severity: request.severity,
+				since: request.since,
+				until: request.until,
+				acknowledged: false,
+			}).map((item) => item.id),
+		);
+		let count = 0;
+		for (const record of this.sent) {
+			if (targetIds.has(record.id) && !record.acknowledged) {
 				record.acknowledged = true;
 				count += 1;
 			}
@@ -345,6 +372,18 @@ export function createNotificationAckService(
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => ({
 			acknowledged: notification.ack(req),
+		}),
+	};
+}
+
+export function createNotificationAckAllService(
+	notification: NotificationService,
+): OSService<NotificationAckAllRequest, { acknowledged: number }> {
+	return {
+		name: "notification.ackAll",
+		requiredPermissions: ["notification:write"],
+		execute: async (req) => ({
+			acknowledged: notification.ackAll(req),
 		}),
 	};
 }

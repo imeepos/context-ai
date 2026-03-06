@@ -32,6 +32,7 @@ import {
 	NotificationService,
 	createNotificationListService,
 	createNotificationAckService,
+	createNotificationAckAllService,
 	createNotificationMuteListService,
 	createNotificationMuteService,
 	createNotificationSendService,
@@ -224,6 +225,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("scheduler.failures.replay", () => createSchedulerFailuresReplayService(schedulerService));
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
 	registerWhenEnabled("notification.ack", () => createNotificationAckService(notificationService));
+	registerWhenEnabled("notification.ackAll", () => createNotificationAckAllService(notificationService));
 	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
 	registerWhenEnabled("notification.mute", () => createNotificationMuteService(notificationService));
 	registerWhenEnabled("notification.mute.list", () => createNotificationMuteListService(notificationService));
