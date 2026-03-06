@@ -17,6 +17,7 @@ export class AppManager {
 	readonly routes = new AppRouteRegistry();
 	private readonly disabledApps = new Set<string>();
 	private readonly installReports = new Map<string, AppInstallDeltaReport>();
+	private readonly rollbackSnapshots = new Map<string, { appId: string; previous?: AppManifestV1 }>();
 
 	install(manifest: AppManifest, quota?: AppQuota): void {
 		const normalized = normalizeManifest(manifest);
@@ -51,6 +52,11 @@ export class AppManager {
 		this.quota.reset(appId);
 		this.disabledApps.delete(appId);
 		this.installReports.delete(appId);
+		for (const [token, snapshot] of this.rollbackSnapshots.entries()) {
+			if (snapshot.appId === appId) {
+				this.rollbackSnapshots.delete(token);
+			}
+		}
 	}
 
 	setState(appId: string, state: AppLifecycleState): AppLifecycleState {
@@ -78,6 +84,23 @@ export class AppManager {
 	getInstallReport(appId: string): AppInstallDeltaReport | undefined {
 		return this.installReports.get(appId);
 	}
+
+	setRollbackSnapshot(rollbackToken: string, snapshot: { appId: string; previous?: AppManifestV1 }): void {
+		this.rollbackSnapshots.set(rollbackToken, {
+			appId: snapshot.appId,
+			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
+		});
+	}
+
+	consumeRollbackSnapshot(rollbackToken: string): { appId: string; previous?: AppManifestV1 } | undefined {
+		const snapshot = this.rollbackSnapshots.get(rollbackToken);
+		this.rollbackSnapshots.delete(rollbackToken);
+		if (!snapshot) return undefined;
+		return {
+			appId: snapshot.appId,
+			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
+		};
+	}
 }
 
 export interface AppInstallRequest {
@@ -92,6 +115,11 @@ export interface AppInstallDeltaReport {
 	addedPages: string[];
 	addedPolicies: string[];
 	addedObservability: string[];
+	rollbackToken: string;
+}
+
+export interface AppInstallRollbackRequest {
+	appId: string;
 	rollbackToken: string;
 }
 
@@ -176,7 +204,39 @@ export function createAppInstallService(
 				rollbackToken: `${next.id}@${next.version}:${Date.now()}`,
 			};
 			manager.setInstallReport(report);
+			manager.setRollbackSnapshot(report.rollbackToken, {
+				appId: next.id,
+				previous,
+			});
 			return { ok: true, report };
+		},
+	};
+}
+
+export function createAppInstallRollbackService(
+	manager: AppManager,
+): OSService<AppInstallRollbackRequest, { ok: true; restoredVersion?: string; uninstalled: boolean }> {
+	return {
+		name: "app.install.rollback",
+		requiredPermissions: ["app:manage"],
+		execute: async (req) => {
+			const snapshot = manager.consumeRollbackSnapshot(req.rollbackToken);
+			if (!snapshot || snapshot.appId !== req.appId) {
+				throw new OSError("E_VALIDATION_FAILED", `Invalid rollback token: ${req.rollbackToken}`);
+			}
+			if (snapshot.previous) {
+				manager.install(snapshot.previous);
+				return {
+					ok: true,
+					restoredVersion: snapshot.previous.version,
+					uninstalled: false,
+				};
+			}
+			manager.uninstall(req.appId);
+			return {
+				ok: true,
+				uninstalled: true,
+			};
 		},
 	};
 }
@@ -578,3 +638,7 @@ export function createRuntimeRiskConfirmService(): OSService<
 export type { AppManifest } from "./manifest.js";
 export type { AppLifecycleState } from "./lifecycle.js";
 export type { AppQuota } from "./quota.js";
+
+function cloneManifest(manifest: AppManifestV1): AppManifestV1 {
+	return JSON.parse(JSON.stringify(manifest)) as AppManifestV1;
+}

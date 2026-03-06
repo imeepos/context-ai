@@ -4,6 +4,7 @@ import {
 	createAppEnableService,
 	createAppInstallV1Service,
 	createAppInstallService,
+	createAppInstallRollbackService,
 	createAppListService,
 	createAppPageRenderService,
 	createRenderService,
@@ -288,6 +289,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 			},
 		}),
 	);
+	registerWhenEnabled("app.install.rollback", () => createAppInstallRollbackService(appManager));
 	registerWhenEnabled("app.install.v1", () => createAppInstallV1Service(appManager, securityService));
 	registerWhenEnabled("app.state.set", () => createAppSetStateService(appManager));
 	registerWhenEnabled("app.list", () => createAppListService(appManager));

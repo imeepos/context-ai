@@ -97,7 +97,7 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 
-			await os.kernel.execute(
+			const notesInstall = await os.kernel.execute(
 				"app.install",
 				{
 					manifest: {
@@ -110,8 +110,14 @@ describe("createDefaultLLMOS", () => {
 				},
 				context,
 			);
+			const notesRollback = await os.kernel.execute(
+				"app.install.rollback",
+				{ appId: "app.notes", rollbackToken: notesInstall.report.rollbackToken },
+				context,
+			);
+			expect(notesRollback.uninstalled).toBe(true);
 			const apps = await os.kernel.execute("app.list", { _: "list" }, context);
-			expect(apps.apps).toHaveLength(3);
+			expect(apps.apps).toHaveLength(2);
 			const installEvents = await os.kernel.execute("notification.list", { topic: "system.app.install", limit: 10 }, context);
 			expect(installEvents.notifications.length).toBeGreaterThan(0);
 			const routes = await os.kernel.execute(
