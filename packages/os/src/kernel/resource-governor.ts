@@ -44,6 +44,7 @@ export class AppAuthorizationGovernor implements ResourceGovernor {
 		private readonly bypassServices: Set<string> = new Set([
 			"app.install",
 			"app.install.v1",
+			"app.install.rollback",
 			"app.list",
 			"app.state.set",
 			"app.uninstall",
