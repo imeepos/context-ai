@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { gunzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { LLMOSKernel } from "../kernel/index.js";
 import { EventBus } from "../kernel/event-bus.js";
 import { NetService } from "../net-service/index.js";
@@ -473,6 +474,7 @@ describe("SystemService", () => {
 		expect(json.compressed).toBe(false);
 		expect(security.verify(json.content, "errors-export-secret", json.signature)).toBe(true);
 		expect(json.keyId).toBe("default");
+		expect(json.contentSha256).toBe(createHash("sha256").update(json.content, "utf8").digest("hex"));
 		expect(json.content).toContain("\"totalFailures\":1");
 		const csv = await service.execute(
 			{ format: "csv", servicePrefix: "err.", compress: true, signingSecret: "ek1" },
@@ -486,6 +488,7 @@ describe("SystemService", () => {
 		expect(csv.contentType).toBe("application/gzip+base64");
 		expect(csv.compressed).toBe(true);
 		expect(security.verify(csv.content, "ek1", csv.signature)).toBe(true);
+		expect(csv.contentSha256).toBe(createHash("sha256").update(csv.content, "utf8").digest("hex"));
 		const decompressedCsv = gunzipSync(Buffer.from(csv.content, "base64")).toString("utf8");
 		expect(decompressedCsv.split("\n")[0]).toBe("timestamp,service,errorCode,error,traceId,appId,sessionId");
 		expect(decompressedCsv).toContain("err.export");

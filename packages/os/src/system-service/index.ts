@@ -7,6 +7,7 @@ import type { PolicyInput } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 import type { TenantQuotaGovernor } from "../kernel/resource-governor.js";
 import { gzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { OSError } from "../kernel/errors.js";
 
 export interface SystemHealthResponse {
@@ -349,6 +350,7 @@ export interface SystemErrorsExportResponse {
 	format: "json" | "csv";
 	contentType: "application/json" | "text/csv" | "application/gzip+base64";
 	content: string;
+	contentSha256: string;
 	compressed: boolean;
 	signature: string;
 	keyId: string;
@@ -509,6 +511,7 @@ export function createSystemErrorsExportService(
 					format,
 					contentType: "application/gzip+base64",
 					content,
+					contentSha256: createHash("sha256").update(content, "utf8").digest("hex"),
 					compressed: true,
 					signature: securityService.sign(content, signingSecret),
 					keyId: selectedKeyId,
@@ -519,6 +522,7 @@ export function createSystemErrorsExportService(
 					format: "csv",
 					contentType: "text/csv",
 					content: payload,
+					contentSha256: createHash("sha256").update(payload, "utf8").digest("hex"),
 					compressed: false,
 					signature: securityService.sign(payload, signingSecret),
 					keyId: selectedKeyId,
@@ -528,6 +532,7 @@ export function createSystemErrorsExportService(
 				format: "json",
 				contentType: "application/json",
 				content: payload,
+				contentSha256: createHash("sha256").update(payload, "utf8").digest("hex"),
 				compressed: false,
 				signature: securityService.sign(payload, signingSecret),
 				keyId: selectedKeyId,
