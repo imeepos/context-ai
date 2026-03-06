@@ -78,6 +78,12 @@ const task = await os.kernel.execute("task.submit", {
   text: "Summarize current app status",
   route: "app.demo://main",
 }, context);
+const routes = await os.kernel.execute("system.routes", {
+  appId: "app.demo",
+  prefix: "app.demo://",
+  offset: 0,
+  limit: 10,
+}, context);
 const health = await os.kernel.execute("system.health", {}, context);
 ```
 
