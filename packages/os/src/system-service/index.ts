@@ -111,6 +111,7 @@ export interface SystemAppInstallReportResponse {
 	addedPages: string[];
 	addedPolicies: string[];
 	addedObservability: string[];
+	rollbackToken: string;
 }
 
 export function createSystemAppInstallReportService(
@@ -121,12 +122,14 @@ export function createSystemAppInstallReportService(
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			const manifest = appManager.registry.get(req.appId);
+			const report = appManager.getInstallReport(req.appId);
 			return {
 				appId: manifest.id,
-				version: manifest.version,
-				addedPages: manifest.entry.pages.map((page) => page.route),
-				addedPolicies: [...manifest.permissions],
-				addedObservability: [`audit:${manifest.id}`, `metrics:${manifest.id}`, `events:${manifest.id}`],
+				version: report?.version ?? manifest.version,
+				addedPages: report?.addedPages ?? manifest.entry.pages.map((page) => page.route),
+				addedPolicies: report?.addedPolicies ?? [...manifest.permissions],
+				addedObservability: report?.addedObservability ?? [`audit:${manifest.id}`, `metrics:${manifest.id}`, `events:${manifest.id}`],
+				rollbackToken: report?.rollbackToken ?? `${manifest.id}@${manifest.version}:unknown`,
 			};
 		},
 	};

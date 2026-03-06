@@ -16,6 +16,7 @@ export class AppManager {
 	readonly quota = new AppQuotaManager();
 	readonly routes = new AppRouteRegistry();
 	private readonly disabledApps = new Set<string>();
+	private readonly installReports = new Map<string, AppInstallDeltaReport>();
 
 	install(manifest: AppManifest, quota?: AppQuota): void {
 		const normalized = normalizeManifest(manifest);
@@ -49,6 +50,7 @@ export class AppManager {
 		this.permissions.revokeAll(appId);
 		this.quota.reset(appId);
 		this.disabledApps.delete(appId);
+		this.installReports.delete(appId);
 	}
 
 	setState(appId: string, state: AppLifecycleState): AppLifecycleState {
@@ -67,6 +69,14 @@ export class AppManager {
 
 	isEnabled(appId: string): boolean {
 		return this.registry.has(appId) && !this.disabledApps.has(appId);
+	}
+
+	setInstallReport(report: AppInstallDeltaReport): void {
+		this.installReports.set(report.appId, report);
+	}
+
+	getInstallReport(appId: string): AppInstallDeltaReport | undefined {
+		return this.installReports.get(appId);
 	}
 }
 
@@ -165,6 +175,7 @@ export function createAppInstallService(
 				addedObservability: [`audit:${next.id}`, `metrics:${next.id}`, `events:${next.id}`],
 				rollbackToken: `${next.id}@${next.version}:${Date.now()}`,
 			};
+			manager.setInstallReport(report);
 			return { ok: true, report };
 		},
 	};

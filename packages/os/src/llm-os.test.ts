@@ -122,6 +122,8 @@ describe("createDefaultLLMOS", () => {
 			expect(routes.total).toBeGreaterThan(0);
 			const routeStats = await os.kernel.execute("system.routes.stats", { appId: "app.default" }, context);
 			expect(Array.isArray(routeStats.stats)).toBe(true);
+			const installReport = await os.kernel.execute("system.app.install.report", { appId: "app.v1" }, context);
+			expect(installReport.rollbackToken).toContain("app.v1@1.0.0:");
 			const startedV1 = await os.kernel.execute("app.start", { appId: "app.v1" }, context);
 			expect(startedV1.route).toBe("app.v1://main");
 

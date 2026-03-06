@@ -556,6 +556,7 @@ describe("AppManager", () => {
 		expect(forced.ok).toBe(true);
 		expect(forced.report.appId).toBe("todo");
 		expect(Array.isArray(forced.report.addedObservability)).toBe(true);
+		expect(manager.getInstallReport("todo")?.rollbackToken).toBe(forced.report.rollbackToken);
 	});
 
 	it("supports v1 install with signature verification", async () => {

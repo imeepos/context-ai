@@ -236,6 +236,7 @@ describe("SystemService", () => {
 		);
 		expect(report.appId).toBe("todo");
 		expect(report.addedPages).toContain("todo://list");
+		expect(typeof report.rollbackToken).toBe("string");
 		const deltaAll = await delta.execute(
 			{},
 			{
