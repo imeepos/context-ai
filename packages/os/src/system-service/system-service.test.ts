@@ -8,7 +8,7 @@ import { NotificationService } from "../notification-service/index.js";
 import { PolicyEngine } from "../kernel/policy-engine.js";
 import { SchedulerService } from "../scheduler-service/index.js";
 import { SecurityService } from "../security-service/index.js";
-import { AppManager } from "../app-manager/index.js";
+import { AppManager, createAppInstallService, createAppInstallRollbackService } from "../app-manager/index.js";
 import { TenantQuotaGovernor } from "../kernel/resource-governor.js";
 import { OSError } from "../kernel/errors.js";
 import { vi } from "vitest";
@@ -259,6 +259,92 @@ describe("SystemService", () => {
 		);
 		expect(deltaOne.apps).toHaveLength(1);
 		expect(deltaOne.apps[0]?.appId).toBe("todo");
+	});
+
+	it("returns restored install report after rollback", async () => {
+		const manager = new AppManager();
+		const install = createAppInstallService(manager);
+		const rollback = createAppInstallRollbackService(manager);
+		await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.0.0",
+					entry: {
+						pages: [
+							{
+								id: "list",
+								route: "todo://list",
+								name: "List",
+								description: "Show todo list",
+								path: "src/todo/list.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:read"],
+				},
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s6-install-report-rollback",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const upgraded = await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.1.0",
+					entry: {
+						pages: [
+							{
+								id: "board",
+								route: "todo://board",
+								name: "Board",
+								description: "Show todo board",
+								path: "src/todo/board.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:read"],
+				},
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s6-install-report-rollback",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		await rollback.execute(
+			{
+				appId: "todo",
+				rollbackToken: upgraded.report.rollbackToken,
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s6-install-report-rollback",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const installReport = createSystemAppInstallReportService(manager);
+		const report = await installReport.execute(
+			{ appId: "todo" },
+			{
+				appId: "app.demo",
+				sessionId: "s6-install-report-rollback",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(report.version).toBe("1.0.0");
+		expect(report.addedPages).toEqual(["todo://list"]);
 	});
 
 	it("returns route registry snapshot", async () => {
