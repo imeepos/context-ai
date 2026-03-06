@@ -269,6 +269,12 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(Array.isArray(breaches.breaches)).toBe(true);
+			const alertsHealth = await os.kernel.execute(
+				"system.alerts.health",
+				{ topic: "system.alert", windowMinutes: 10 },
+				context,
+			);
+			expect(["healthy", "degraded", "critical"]).toContain(alertsHealth.level);
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(

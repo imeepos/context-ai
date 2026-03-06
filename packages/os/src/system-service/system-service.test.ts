@@ -34,6 +34,7 @@ import {
 	createSystemAlertsFeedService,
 	createSystemAlertsBacklogService,
 	createSystemAlertsBreachesService,
+	createSystemAlertsHealthService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -902,6 +903,41 @@ describe("SystemService", () => {
 		expect(response.newestUnackedAgeMs).toBe(120000);
 		expect(response.overdueCount).toBe(1);
 		expect(response.bySeverity.error).toBe(1);
+		vi.useRealTimers();
+	});
+
+	it("returns alert health score and level", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			rateLimit: { limit: 1, windowMs: 60000 },
+		});
+		notification.send({ topic: "system.alert", message: "h1", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "h2", severity: "critical" }); // dropped by rate limit
+		vi.setSystemTime(new Date("2026-01-01T00:01:00.000Z"));
+
+		const service = createSystemAlertsHealthService(notification);
+		const response = await service.execute(
+			{
+				topic: "system.alert",
+				windowMinutes: 5,
+				criticalThreshold: 0,
+				unackedThreshold: 0,
+				dropRateThreshold: 0,
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s32",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.score).toBeLessThan(100);
+		expect(["healthy", "degraded", "critical"]).toContain(response.level);
+		expect(response.indicators.criticalCount).toBe(1);
+		expect(response.indicators.unackedCount).toBe(1);
+		expect(response.indicators.dropRate).toBeGreaterThan(0);
 		vi.useRealTimers();
 	});
 });
