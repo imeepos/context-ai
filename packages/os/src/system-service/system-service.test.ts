@@ -27,6 +27,7 @@ import {
 	createSystemAlertsDigestService,
 	createSystemAlertsReportService,
 	createSystemAlertsReportCompactService,
+	createSystemAlertsFlappingService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -694,5 +695,32 @@ describe("SystemService", () => {
 		);
 		expect(typeof response.summary).toBe("string");
 		expect(response.summary).toContain("total=");
+	});
+
+	it("detects flapping alerts", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:20.000Z"));
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		vi.setSystemTime(new Date("2026-01-01T00:01:00.000Z"));
+
+		const service = createSystemAlertsFlappingService(notification);
+		const response = await service.execute(
+			{ windowMinutes: 2, threshold: 3 },
+			{
+				appId: "app.demo",
+				sessionId: "s25",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.total).toBe(1);
+		expect(response.items[0]?.message).toBe("db down");
+		vi.useRealTimers();
 	});
 });

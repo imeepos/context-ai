@@ -221,6 +221,12 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(typeof compact.summary).toBe("string");
+			const flapping = await os.kernel.execute(
+				"system.alerts.flapping",
+				{ topic: "system.alert", windowMinutes: 10, threshold: 2 },
+				context,
+			);
+			expect(typeof flapping.total).toBe("number");
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(
