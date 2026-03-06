@@ -42,6 +42,12 @@ export class AppQuotaManager {
 		return this.usage.get(appId) ?? { toolCalls: 0, tokens: 0 };
 	}
 
+	getQuota(appId: string): AppQuota | undefined {
+		const quota = this.quotas.get(appId);
+		if (!quota) return undefined;
+		return { ...quota };
+	}
+
 	reset(appId: string): void {
 		this.usage.delete(appId);
 		this.quotas.delete(appId);

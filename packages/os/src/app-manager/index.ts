@@ -18,7 +18,10 @@ export class AppManager {
 	readonly routes = new AppRouteRegistry();
 	private readonly disabledApps = new Set<string>();
 	private readonly installReports = new Map<string, AppInstallDeltaReport>();
-	private readonly rollbackSnapshots = new Map<string, { appId: string; previous?: AppManifestV1 }>();
+	private readonly rollbackSnapshots = new Map<
+		string,
+		{ appId: string; previous?: AppManifestV1; previousQuota?: AppQuota }
+	>();
 
 	install(manifest: AppManifest, quota?: AppQuota): void {
 		const normalized = normalizeManifest(manifest);
@@ -86,17 +89,21 @@ export class AppManager {
 		return this.installReports.get(appId);
 	}
 
-	setRollbackSnapshot(rollbackToken: string, snapshot: { appId: string; previous?: AppManifestV1 }): void {
+	setRollbackSnapshot(
+		rollbackToken: string,
+		snapshot: { appId: string; previous?: AppManifestV1; previousQuota?: AppQuota },
+	): void {
 		this.rollbackSnapshots.set(rollbackToken, {
 			appId: snapshot.appId,
 			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
+			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
 		});
 	}
 
 	consumeRollbackSnapshot(
 		rollbackToken: string,
 		options?: { appId?: string },
-	): { appId: string; previous?: AppManifestV1 } | undefined {
+	): { appId: string; previous?: AppManifestV1; previousQuota?: AppQuota } | undefined {
 		const snapshot = this.rollbackSnapshots.get(rollbackToken);
 		if (!snapshot) return undefined;
 		if (options?.appId && snapshot.appId !== options.appId) {
@@ -106,6 +113,7 @@ export class AppManager {
 		return {
 			appId: snapshot.appId,
 			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
+			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
 		};
 	}
 }
@@ -194,6 +202,7 @@ export function createAppInstallService(
 		execute: async (req) => {
 			const next = normalizeManifest(req.manifest);
 			const previous = manager.registry.has(next.id) ? manager.registry.get(next.id) : undefined;
+			const previousQuota = manager.quota.getQuota(next.id);
 			const addedRoutes = diffAddedRoutes(previous, next);
 			if (!req.force && addedRoutes === 0 && previous) {
 				throw new OSError("E_VALIDATION_FAILED", `No page delta for app.install: ${next.id}`);
@@ -214,6 +223,7 @@ export function createAppInstallService(
 			manager.setRollbackSnapshot(report.rollbackToken, {
 				appId: next.id,
 				previous,
+				previousQuota,
 			});
 			return { ok: true, report };
 		},
@@ -234,6 +244,10 @@ export function createAppInstallRollbackService(
 			}
 			if (snapshot.previous) {
 				manager.install(snapshot.previous);
+				manager.quota.reset(req.appId);
+				if (snapshot.previousQuota) {
+					manager.quota.setQuota(req.appId, snapshot.previousQuota);
+				}
 				manager.setInstallReport({
 					appId: snapshot.previous.id,
 					version: snapshot.previous.version,
