@@ -308,8 +308,8 @@ describe("SystemService", () => {
 				workingDirectory: process.cwd(),
 			},
 		);
-		expect(response.routes).toContain("todo://list");
-		expect(response.total).toBe(2);
+		expect(response.routes).toEqual(["todo://detail"]);
+		expect(response.total).toBe(1);
 		const filtered = await service.execute(
 			{ appId: "todo", prefix: "todo://d", offset: 0, limit: 1 },
 			{

@@ -18,8 +18,12 @@ export class AppManager {
 	private readonly disabledApps = new Set<string>();
 
 	install(manifest: AppManifest, quota?: AppQuota): void {
-		this.registry.install(manifest);
 		const normalized = normalizeManifest(manifest);
+		const alreadyInstalled = this.registry.has(normalized.id);
+		this.registry.install(manifest);
+		if (alreadyInstalled) {
+			this.routes.unregisterApp(normalized.id);
+		}
 		this.routes.register(normalized);
 		this.permissions.grant(manifest.id, manifest.permissions);
 		if (quota) {

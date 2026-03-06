@@ -158,6 +158,50 @@ describe("AppManager", () => {
 		expect(resolved.page.path).toBe("src/todo/list.tsx");
 	});
 
+	it("replaces stale routes when install is called with same app id", () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.1.0",
+			entry: {
+				pages: [
+					{
+						id: "board",
+						route: "todo://board",
+						name: "Board",
+						description: "Show todo board",
+						path: "src/todo/board.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		expect(() => manager.routes.resolve("todo://list")).toThrowError(
+			expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>),
+		);
+		expect(manager.routes.resolve("todo://board").page.path).toBe("src/todo/board.tsx");
+	});
+
 	it("renders app page by route", async () => {
 		const manager = new AppManager();
 		manager.install({
