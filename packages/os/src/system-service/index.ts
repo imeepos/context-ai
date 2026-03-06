@@ -1714,6 +1714,9 @@ export function createSystemAlertsAutoRemediatePlanService(
 export interface SystemAlertsAutoRemediateExecuteRequest {
 	approved?: boolean;
 	dryRun?: boolean;
+	approver?: string;
+	approvalExpiresAt?: string;
+	ticketId?: string;
 	actions: SystemAlertsAutoRemediateAction[];
 }
 
@@ -1728,6 +1731,23 @@ export interface SystemAlertsAutoRemediateExecuteResponse {
 	}>;
 }
 
+export interface SystemAlertsAutoRemediateAuditRecord {
+	id: string;
+	timestamp: string;
+	appId: string;
+	sessionId: string;
+	traceId?: string;
+	approved: boolean;
+	approver?: string;
+	approvalExpiresAt?: string;
+	dryRun: boolean;
+	ticketId?: string;
+	executed: number;
+	results: SystemAlertsAutoRemediateExecuteResponse["results"];
+}
+
+const autoRemediateAuditRecords: SystemAlertsAutoRemediateAuditRecord[] = [];
+
 export function createSystemAlertsAutoRemediateExecuteService(
 	notificationService: NotificationService,
 	schedulerService: SchedulerService,
@@ -1736,9 +1756,19 @@ export function createSystemAlertsAutoRemediateExecuteService(
 	return {
 		name: "system.alerts.auto-remediate.execute",
 		requiredPermissions: ["system:write"],
-		execute: async (req) => {
+		execute: async (req, ctx) => {
+			const appendAudit = (record: Omit<SystemAlertsAutoRemediateAuditRecord, "id" | "timestamp">): void => {
+				autoRemediateAuditRecords.push({
+					id: `ar-${Date.now()}-${autoRemediateAuditRecords.length + 1}`,
+					timestamp: new Date().toISOString(),
+					...record,
+				});
+				if (autoRemediateAuditRecords.length > 1000) {
+					autoRemediateAuditRecords.splice(0, autoRemediateAuditRecords.length - 1000);
+				}
+			};
 			if (!req.approved) {
-				return {
+				const response = {
 					approved: false,
 					executed: 0,
 					results: req.actions.map((action) => ({
@@ -1747,6 +1777,44 @@ export function createSystemAlertsAutoRemediateExecuteService(
 						message: "approval_required",
 					})),
 				};
+				appendAudit({
+					appId: ctx.appId,
+					sessionId: ctx.sessionId,
+					traceId: ctx.traceId,
+					approved: false,
+					approver: req.approver,
+					approvalExpiresAt: req.approvalExpiresAt,
+					dryRun: req.dryRun ?? false,
+					ticketId: req.ticketId,
+					executed: 0,
+					results: response.results,
+				});
+				return response;
+			}
+			const approvalExpiresAtMs = req.approvalExpiresAt ? Date.parse(req.approvalExpiresAt) : Number.NaN;
+			if (!req.approver || Number.isNaN(approvalExpiresAtMs) || approvalExpiresAtMs <= Date.now()) {
+				const response = {
+					approved: false,
+					executed: 0,
+					results: req.actions.map((action) => ({
+						id: action.id,
+						ok: false,
+						message: "approval_metadata_invalid",
+					})),
+				};
+				appendAudit({
+					appId: ctx.appId,
+					sessionId: ctx.sessionId,
+					traceId: ctx.traceId,
+					approved: false,
+					approver: req.approver,
+					approvalExpiresAt: req.approvalExpiresAt,
+					dryRun: req.dryRun ?? false,
+					ticketId: req.ticketId,
+					executed: 0,
+					results: response.results,
+				});
+				return response;
 			}
 			const results: SystemAlertsAutoRemediateExecuteResponse["results"] = [];
 			let executed = 0;
@@ -1808,10 +1876,50 @@ export function createSystemAlertsAutoRemediateExecuteService(
 					rollback: action.rollback,
 				});
 			}
-			return {
+			const response = {
 				approved: true,
 				executed,
 				results,
+			};
+			appendAudit({
+				appId: ctx.appId,
+				sessionId: ctx.sessionId,
+				traceId: ctx.traceId,
+				approved: true,
+				approver: req.approver,
+				approvalExpiresAt: req.approvalExpiresAt,
+				dryRun: req.dryRun ?? false,
+				ticketId: req.ticketId,
+				executed,
+				results,
+			});
+			return response;
+		},
+	};
+}
+
+export function createSystemAlertsAutoRemediateAuditService(): OSService<
+	{
+		sessionId?: string;
+		limit?: number;
+	},
+	{
+		records: SystemAlertsAutoRemediateAuditRecord[];
+	}
+> {
+	return {
+		name: "system.alerts.auto-remediate.audit",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			let records = [...autoRemediateAuditRecords];
+			if (req.sessionId) {
+				records = records.filter((item) => item.sessionId === req.sessionId);
+			}
+			if (req.limit && req.limit > 0) {
+				records = records.slice(-req.limit);
+			}
+			return {
+				records,
 			};
 		},
 	};
@@ -1915,6 +2023,90 @@ export function createSystemPolicySimulateBatchService(
 				denied,
 				decisions,
 				reasons,
+			};
+		},
+	};
+}
+
+export interface SystemPolicyGuardApplyRequest {
+	patch: Partial<ReturnType<LLMOSKernel["policy"]["getSnapshot"]>>;
+	simulationInputs?: PolicyInput[];
+	requireAllSimulationsAllowed?: boolean;
+	healthCheck?: {
+		service?: string;
+		maxErrorRate?: number;
+		minSuccessRate?: number;
+	};
+}
+
+export interface SystemPolicyGuardApplyResponse {
+	applied: boolean;
+	rolledBack: boolean;
+	reason?: "simulation_denied" | "health_check_failed";
+	simulation?: SystemPolicySimulateBatchResponse;
+	policy: ReturnType<LLMOSKernel["policy"]["getSnapshot"]>;
+}
+
+export function createSystemPolicyGuardApplyService(
+	kernel: LLMOSKernel,
+): OSService<SystemPolicyGuardApplyRequest, SystemPolicyGuardApplyResponse> {
+	return {
+		name: "system.policy.guard.apply",
+		requiredPermissions: ["system:write"],
+		execute: async (req, ctx) => {
+			let simulation: SystemPolicySimulateBatchResponse | undefined;
+			if (req.simulationInputs && req.simulationInputs.length > 0) {
+				simulation = await createSystemPolicySimulateBatchService(kernel).execute(
+					{
+						inputs: req.simulationInputs,
+					},
+					ctx,
+				);
+				if (req.requireAllSimulationsAllowed && simulation.denied > 0) {
+					return {
+						applied: false,
+						rolledBack: false,
+						reason: "simulation_denied",
+						simulation,
+						policy: kernel.policy.getSnapshot(),
+					};
+				}
+			}
+
+			const preVersion = kernel.policy.createVersion("guard:pre-apply");
+			kernel.policy.updateRules(req.patch);
+
+			if (req.healthCheck) {
+				const snapshots = kernel.metrics.allSnapshots();
+				const target = req.healthCheck.service
+					? snapshots.filter((item) => item.service === req.healthCheck!.service)
+					: snapshots;
+				const total = target.reduce((sum, item) => sum + item.total, 0);
+				const success = target.reduce((sum, item) => sum + item.success, 0);
+				const failure = target.reduce((sum, item) => sum + item.failure, 0);
+				const successRate = total === 0 ? 1 : success / total;
+				const errorRate = total === 0 ? 0 : failure / total;
+				const failedBySuccess =
+					req.healthCheck.minSuccessRate !== undefined && successRate < req.healthCheck.minSuccessRate;
+				const failedByError =
+					req.healthCheck.maxErrorRate !== undefined && errorRate > req.healthCheck.maxErrorRate;
+				if (failedBySuccess || failedByError) {
+					kernel.policy.rollbackVersion(preVersion.versionId);
+					return {
+						applied: false,
+						rolledBack: true,
+						reason: "health_check_failed",
+						simulation,
+						policy: kernel.policy.getSnapshot(),
+					};
+				}
+			}
+			kernel.policy.createVersion("guard:applied");
+			return {
+				applied: true,
+				rolledBack: false,
+				simulation,
+				policy: kernel.policy.getSnapshot(),
 			};
 		},
 	};

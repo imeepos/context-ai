@@ -284,10 +284,22 @@ describe("createDefaultLLMOS", () => {
 			expect(Array.isArray(remediationPlan.actions)).toBe(true);
 			const remediationExec = await os.kernel.execute(
 				"system.alerts.auto-remediate.execute",
-				{ approved: true, dryRun: true, actions: remediationPlan.actions },
+				{
+					approved: true,
+					dryRun: true,
+					approver: "ops.lead",
+					approvalExpiresAt: new Date(Date.now() + 60000).toISOString(),
+					actions: remediationPlan.actions,
+				},
 				context,
 			);
 			expect(remediationExec.approved).toBe(true);
+			const remediationAudit = await os.kernel.execute(
+				"system.alerts.auto-remediate.audit",
+				{ limit: 10 },
+				context,
+			);
+			expect(Array.isArray(remediationAudit.records)).toBe(true);
 			const slo = await os.kernel.execute("system.slo", {}, context);
 			expect(typeof slo.global.successRate).toBe("number");
 			const policyVersion = await os.kernel.execute("system.policy.version.create", { label: "test" }, context);
@@ -306,6 +318,16 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(policyUpdate.policy.networkRule.denyDomains).toContain("forbidden.local");
+			const policyGuard = await os.kernel.execute(
+				"system.policy.guard.apply",
+				{
+					patch: { networkRule: { denyDomains: ["guard.local"] } },
+					simulationInputs: [{ command: "echo ok" }],
+					requireAllSimulationsAllowed: true,
+				},
+				context,
+			);
+			expect(typeof policyGuard.applied).toBe("boolean");
 			const policyRollback = await os.kernel.execute(
 				"system.policy.version.rollback",
 				{ versionId: policyVersion.versionId },

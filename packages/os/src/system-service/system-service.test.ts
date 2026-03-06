@@ -38,11 +38,13 @@ import {
 	createSystemAlertsHealthService,
 	createSystemAlertsAutoRemediatePlanService,
 	createSystemAlertsAutoRemediateExecuteService,
+	createSystemAlertsAutoRemediateAuditService,
 	createSystemPolicyUpdateService,
 	createSystemPolicyVersionCreateService,
 	createSystemPolicyVersionListService,
 	createSystemPolicyVersionRollbackService,
 	createSystemPolicySimulateBatchService,
+	createSystemPolicyGuardApplyService,
 	createSystemSLOService,
 	createSystemAuditExportService,
 	createSystemQuotaService,
@@ -1007,7 +1009,13 @@ describe("SystemService", () => {
 		);
 		expect(denied.approved).toBe(false);
 		const executed = await executeService.execute(
-			{ approved: true, dryRun: true, actions: plan.actions },
+			{
+				approved: true,
+				dryRun: true,
+				approver: "ops.lead",
+				approvalExpiresAt: new Date(Date.now() + 60000).toISOString(),
+				actions: plan.actions,
+			},
 			{
 				appId: "app.demo",
 				sessionId: "s33",
@@ -1016,7 +1024,55 @@ describe("SystemService", () => {
 			},
 		);
 		expect(executed.executed).toBe(plan.actions.length);
+		const auditService = createSystemAlertsAutoRemediateAuditService();
+		const audit = await auditService.execute(
+			{ limit: 10 },
+			{
+				appId: "app.demo",
+				sessionId: "s33",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(audit.records.length).toBeGreaterThan(0);
 		vi.useRealTimers();
+	});
+
+	it("rejects remediation execute when approval metadata is missing or expired", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		const scheduler = new SchedulerService();
+		const net = new NetService(new PolicyEngine(), new SecurityService());
+		const executeService = createSystemAlertsAutoRemediateExecuteService(notification, scheduler, net);
+		const noApprover = await executeService.execute(
+			{
+				approved: true,
+				approvalExpiresAt: new Date(Date.now() + 60000).toISOString(),
+				actions: [],
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s33b",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(noApprover.approved).toBe(false);
+		const expired = await executeService.execute(
+			{
+				approved: true,
+				approver: "ops.lead",
+				approvalExpiresAt: new Date(Date.now() - 1000).toISOString(),
+				actions: [],
+			},
+			{
+				appId: "app.demo",
+				sessionId: "s33b",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(expired.approved).toBe(false);
 	});
 
 	it("supports policy versioning and rollback", async () => {
@@ -1054,6 +1110,41 @@ describe("SystemService", () => {
 		);
 		expect(response.total).toBe(2);
 		expect(response.denied).toBe(1);
+	});
+
+	it("guards policy change by pre-simulation and post-health rollback", async () => {
+		const kernel = new LLMOSKernel();
+		const guard = createSystemPolicyGuardApplyService(kernel);
+		const denied = await guard.execute(
+			{
+				patch: { networkRule: { denyDomains: ["a.local"] } },
+				simulationInputs: [{ command: "rm -rf /" }],
+				requireAllSimulationsAllowed: true,
+			},
+			{ appId: "app.demo", sessionId: "s35b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(denied.applied).toBe(false);
+		expect(denied.reason).toBe("simulation_denied");
+
+		kernel.registerService({
+			name: "guard.fail",
+			requiredPermissions: [],
+			execute: async () => {
+				throw new Error("boom");
+			},
+		});
+		await expect(
+			kernel.execute("guard.fail", {}, { appId: "app.demo", sessionId: "s35b", permissions: [], workingDirectory: process.cwd() }),
+		).rejects.toThrow();
+		const rolled = await guard.execute(
+			{
+				patch: { networkRule: { denyDomains: ["b.local"] } },
+				healthCheck: { maxErrorRate: 0 },
+			},
+			{ appId: "app.demo", sessionId: "s35b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(rolled.applied).toBe(false);
+		expect(rolled.rolledBack).toBe(true);
 	});
 
 	it("returns global slo and alerting metrics", async () => {

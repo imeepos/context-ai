@@ -87,6 +87,7 @@ import {
 	createSystemAlertsHealthService,
 	createSystemAlertsAutoRemediatePlanService,
 	createSystemAlertsAutoRemediateExecuteService,
+	createSystemAlertsAutoRemediateAuditService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -105,6 +106,7 @@ import {
 	createSystemPolicyVersionListService,
 	createSystemPolicyVersionRollbackService,
 	createSystemPolicySimulateBatchService,
+	createSystemPolicyGuardApplyService,
 	createSystemSLOService,
 	createSystemAuditExportService,
 	createSystemQuotaService,
@@ -289,6 +291,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.policy.version.list", () => createSystemPolicyVersionListService(kernel));
 	registerWhenEnabled("system.policy.version.rollback", () => createSystemPolicyVersionRollbackService(kernel));
 	registerWhenEnabled("system.policy.simulate.batch", () => createSystemPolicySimulateBatchService(kernel));
+	registerWhenEnabled("system.policy.guard.apply", () => createSystemPolicyGuardApplyService(kernel));
 	registerWhenEnabled("system.net.circuit", () => createSystemNetCircuitService(netService));
 	registerWhenEnabled("system.net.circuit.reset", () => createSystemNetCircuitResetService(netService));
 	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
@@ -323,6 +326,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.alerts.auto-remediate.execute", () =>
 		createSystemAlertsAutoRemediateExecuteService(notificationService, schedulerService, netService),
 	);
+	registerWhenEnabled("system.alerts.auto-remediate.audit", () => createSystemAlertsAutoRemediateAuditService());
 	registerWhenEnabled("system.slo", () => createSystemSLOService(kernel, notificationService));
 	registerWhenEnabled("system.audit.export", () => createSystemAuditExportService(kernel, securityService));
 	registerWhenEnabled("system.quota", () => createSystemQuotaService(tenantQuotaGovernor));

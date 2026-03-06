@@ -12,6 +12,16 @@
 - [x] M6(审计阶段)-8: 审计增量导出 `system.audit.export`（cursor + gzip + signature）
 - [x] M6(配额阶段)-9: 动态配额 `system.quota/system.quota.adjust`（load/priority 调节）
 - [x] M6(演练阶段)-10: 混沌演练 `system.chaos.run`（policy/scheduler/alert storm drill）
+- [x] M7(闭环阶段)-1: 自动修复执行审批加固（approver + approvalExpiresAt 必填校验）
+- [x] M7(闭环阶段)-2: 自动修复全链路审计 `system.alerts.auto-remediate.audit`
+- [x] M7(闭环阶段)-3: 策略变更守护 `system.policy.guard.apply`（变更前模拟 + 变更后健康检查 + 自动回滚）
+- [ ] M7(生产阶段)-4: 调度持久化接入真实存储适配器（非内存快照）
+- [ ] M7(生产阶段)-5: 告警/审计外部通道标准化配置（Webhook/Slack/Email）
+- [ ] M7(生产阶段)-6: SLO 阈值规则管理与违约告警
+- [ ] M7(多租户阶段)-7: 配额策略中心（按等级/时段/负载）
+- [ ] M7(多租户阶段)-8: 热点租户隔离与限流联动
+- [ ] M7(安全阶段)-9: 审计签名密钥轮换与托管接口
+- [ ] M7(质量阶段)-10: 混沌演练场景扩展与回归基线
 - [x] M5(稳定性阶段)-1: NetService 熔断器（Circuit Breaker）+ `system.net.circuit` 运行态查询
 - [x] M5(稳定性阶段)-2: Scheduler 死信队列（DLQ）+ `system.scheduler.failures` 查询
 - [x] M5(稳定性阶段)-3: DLQ 运维动作 `scheduler.failures.clear`（按 id / 全量清理）
