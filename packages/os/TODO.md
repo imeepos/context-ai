@@ -10,6 +10,7 @@
 - [x] M8(架构收敛)-7: `system.errors` 增强根因观测（`byReason` + `topReasons`）
 - [x] M8(架构收敛)-8: `system.errors` 增强失败链路画像（`byService` + `recent`）
 - [x] M8(架构收敛)-9: `system.errors` 增强时间窗与限流查询（`windowMinutes` + `limit`）
+- [x] M8(架构收敛)-10: README 增加运维排障链路示例（errors -> audit trace drilldown）
 - [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 136 passed, build: pass）
 - [x] M7(补缺)-11: 治理状态统一快照与恢复 `system.governance.state.export/import/persist/recover`
 - [x] M6(自治运维阶段)-1: 自动修复计划 `system.alerts.auto-remediate.plan`（规则化动作编排）

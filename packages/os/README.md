@@ -92,6 +92,37 @@ const tools = createCTPToolsFromKernel(os.kernel, {
 });
 ```
 
+## 运维排障示例
+```ts
+// 1) 先看最近 30 分钟、最近 200 条失败概况
+const errors = await os.kernel.execute(
+  "system.errors",
+  { windowMinutes: 30, limit: 200 },
+  context,
+);
+
+// 2) 锁定高频失败服务（byService）与高频根因（topReasons）
+console.log(errors.byService, errors.topReasons);
+
+// 3) 针对某服务做窄化查询
+const netErrors = await os.kernel.execute(
+  "system.errors",
+  { service: "net.request", windowMinutes: 10, limit: 50 },
+  context,
+);
+
+// 4) 结合 recent 里的 traceId 去 system.audit 精确回放链路
+const traceId = netErrors.recent[0]?.traceId;
+if (traceId) {
+  const traceAudit = await os.kernel.execute(
+    "system.audit",
+    { traceId },
+    context,
+  );
+  console.log(traceAudit.records);
+}
+```
+
 ## 测试与构建
 ```bash
 npm run test -w @context-ai/os
