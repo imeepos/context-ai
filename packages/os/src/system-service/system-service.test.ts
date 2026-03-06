@@ -24,6 +24,7 @@ import {
 	createSystemAlertsTrendsService,
 	createSystemAlertsSLOService,
 	createSystemAlertsIncidentsService,
+	createSystemAlertsDigestService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -619,5 +620,25 @@ describe("SystemService", () => {
 		expect(response.totalIncidents).toBe(2);
 		const dbIncident = response.incidents.find((item) => item.message === "db down");
 		expect(dbIncident?.count).toBe(1);
+	});
+
+	it("returns alert digest text", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "disk high", severity: "warning" });
+		const service = createSystemAlertsDigestService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", limit: 10 },
+			{
+				appId: "app.demo",
+				sessionId: "s22",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.total).toBe(2);
+		expect(response.digest).toContain("critical");
+		expect(response.digest).toContain("db down");
 	});
 });
