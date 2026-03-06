@@ -276,6 +276,7 @@ describe("AppManager", () => {
 		);
 		expect(result.route).toBe("todo://list");
 		expect(result.prompt).toContain("start:todo:todo://list");
+		expect(manager.lifecycle.getState("todo")).toBe("running");
 	});
 
 	it("starts app with provided route", async () => {
@@ -322,6 +323,89 @@ describe("AppManager", () => {
 		);
 		expect(result.route).toBe("todo://detail");
 		expect(result.tools[0]?.name).toBe("todo.open");
+		expect(manager.lifecycle.getState("todo")).toBe("running");
+	});
+
+	it("records failed render when app.start renderer throws", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		const service = createAppStartService(manager, {
+			render: async () => {
+				throw new Error("render boom");
+			},
+		});
+		await expect(
+			service.execute(
+				{ appId: "todo" },
+				{
+					appId: "todo",
+					sessionId: "s-start-failed",
+					permissions: ["app:read"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toThrow("render boom");
+		const stats = manager.routes.stats("todo");
+		expect(stats[0]?.failure).toBeGreaterThan(0);
+	});
+
+	it("recovers lifecycle from suspended to running on app.start", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		manager.setState("todo", "resolved");
+		manager.setState("todo", "active");
+		manager.setState("todo", "running");
+		manager.setState("todo", "suspended");
+		const service = createAppStartService(manager, {
+			render: async ({ page }) => ({
+				prompt: page.route,
+				tools: [],
+			}),
+		});
+		await service.execute(
+			{ appId: "todo" },
+			{
+				appId: "todo",
+				sessionId: "s-start-resume",
+				permissions: ["app:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(manager.lifecycle.getState("todo")).toBe("running");
 	});
 
 	it("validates runtime tools against route app permissions", async () => {

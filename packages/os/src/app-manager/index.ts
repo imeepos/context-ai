@@ -416,27 +416,55 @@ export function createAppStartService(
 			if (resolved.appId !== req.appId) {
 				throw new OSError("E_VALIDATION_FAILED", `Route ${route} does not belong to app ${req.appId}`);
 			}
-			const rendered = await renderer.render({
-				appId: resolved.appId,
-				page: resolved.page,
-				context: {
-					appId: ctx.appId,
-					sessionId: ctx.sessionId,
-					permissions: ctx.permissions,
-					workingDirectory: ctx.workingDirectory,
-				},
-			});
-			return {
-				appId: resolved.appId,
-				route,
-				page: resolved.page,
-				prompt: rendered.prompt,
-				tools: rendered.tools,
-				dataViews: rendered.dataViews,
-				metadata: rendered.metadata,
-			};
+			ensureRunningState(manager, req.appId);
+			try {
+				const rendered = await renderer.render({
+					appId: resolved.appId,
+					page: resolved.page,
+					context: {
+						appId: ctx.appId,
+						sessionId: ctx.sessionId,
+						permissions: ctx.permissions,
+						workingDirectory: ctx.workingDirectory,
+					},
+				});
+				manager.routes.recordRender(route, { success: true });
+				return {
+					appId: resolved.appId,
+					route,
+					page: resolved.page,
+					prompt: rendered.prompt,
+					tools: rendered.tools,
+					dataViews: rendered.dataViews,
+					metadata: rendered.metadata,
+				};
+			} catch (error) {
+				manager.routes.recordRender(route, {
+					success: false,
+					error: error instanceof Error ? error.message : String(error),
+				});
+				throw error;
+			}
 		},
 	};
+}
+
+function ensureRunningState(manager: AppManager, appId: string): void {
+	const current = manager.lifecycle.getState(appId);
+	if (current === "running") return;
+	if (current === "suspended") {
+		manager.setState(appId, "running");
+		return;
+	}
+	if (current === "installed" || current === "stopped") {
+		manager.setState(appId, "resolved");
+	}
+	if (manager.lifecycle.getState(appId) === "resolved") {
+		manager.setState(appId, "active");
+	}
+	if (manager.lifecycle.getState(appId) === "active") {
+		manager.setState(appId, "running");
+	}
 }
 
 export function createRuntimeToolsValidateService(
