@@ -5,24 +5,20 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc",
     "start": "node dist/index.js",
     "test": "vitest run"
   },
-  "dependencies": {
-    "@mariozechner/pi-agent-core": "^0.56.0",
-    "@mariozechner/pi-ai": "^0.56.0",
-    "@silvia-odwyer/photon-node": "^0.3.4",
-    "@sinclair/typebox": "^0.34.48",
-    "chalk": "^5.3.0",
-    "diff": "^8.0.3",
-    "extract-zip": "^2.0.1",
-    "file-type": "^19.6.0",
-    "glob": "^10.4.5"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "@types/diff": "^7.0.2",
     "@types/node": "^20.0.0",
     "typescript": "^5.3.0",
     "vitest": "^3.2.4"
