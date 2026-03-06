@@ -2273,6 +2273,7 @@ export interface SystemAuditExportRequest {
 	format?: "jsonl";
 	compress?: boolean;
 	signingSecret?: string;
+	keyId?: string;
 }
 
 export interface SystemAuditExportResponse {
@@ -2280,8 +2281,25 @@ export interface SystemAuditExportResponse {
 	contentType: string;
 	compressed: boolean;
 	signature: string;
+	keyId: string;
 	nextCursor: number;
 	exported: number;
+}
+
+interface AuditSigningKeyRecord {
+	keyId: string;
+	secret: string;
+	createdAt: string;
+}
+
+const auditSigningKeys = new Map<string, AuditSigningKeyRecord>();
+let activeAuditSigningKeyId = "default";
+if (!auditSigningKeys.has(activeAuditSigningKeyId)) {
+	auditSigningKeys.set(activeAuditSigningKeyId, {
+		keyId: activeAuditSigningKeyId,
+		secret: "audit-export-secret",
+		createdAt: new Date().toISOString(),
+	});
 }
 
 export function createSystemAuditExportService(
@@ -2309,6 +2327,13 @@ export function createSystemAuditExportService(
 			const limit = req.limit && req.limit > 0 ? req.limit : 100;
 			const sliced = records.slice(cursor, cursor + limit);
 			const jsonl = sliced.map((item) => JSON.stringify(item)).join("\n");
+			const selectedKeyId = req.signingSecret
+				? "adhoc"
+				: req.keyId && auditSigningKeys.has(req.keyId)
+					? req.keyId
+					: activeAuditSigningKeyId;
+			const signingSecret =
+				req.signingSecret ?? auditSigningKeys.get(selectedKeyId)?.secret ?? "audit-export-secret";
 			if (req.compress) {
 				const compressedBuffer = gzipSync(Buffer.from(jsonl, "utf8"));
 				const content = compressedBuffer.toString("base64");
@@ -2316,7 +2341,8 @@ export function createSystemAuditExportService(
 					content,
 					contentType: "application/gzip+base64",
 					compressed: true,
-					signature: securityService.sign(content, req.signingSecret ?? "audit-export-secret"),
+					signature: securityService.sign(content, signingSecret),
+					keyId: selectedKeyId,
 					nextCursor: cursor + sliced.length,
 					exported: sliced.length,
 				};
@@ -2325,10 +2351,80 @@ export function createSystemAuditExportService(
 				content: jsonl,
 				contentType: "application/x-ndjson",
 				compressed: false,
-				signature: securityService.sign(jsonl, req.signingSecret ?? "audit-export-secret"),
+				signature: securityService.sign(jsonl, signingSecret),
+				keyId: selectedKeyId,
 				nextCursor: cursor + sliced.length,
 				exported: sliced.length,
 			};
+		},
+	};
+}
+
+export function createSystemAuditKeysRotateService(): OSService<
+	{
+		keyId: string;
+		secret: string;
+		setActive?: boolean;
+	},
+	{
+		activeKeyId: string;
+		keyIds: string[];
+	}
+> {
+	return {
+		name: "system.audit.keys.rotate",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			auditSigningKeys.set(req.keyId, {
+				keyId: req.keyId,
+				secret: req.secret,
+				createdAt: new Date().toISOString(),
+			});
+			if (req.setActive !== false) {
+				activeAuditSigningKeyId = req.keyId;
+			}
+			return {
+				activeKeyId: activeAuditSigningKeyId,
+				keyIds: [...auditSigningKeys.keys()],
+			};
+		},
+	};
+}
+
+export function createSystemAuditKeysListService(): OSService<
+	Record<string, never>,
+	{
+		activeKeyId: string;
+		keys: Array<{ keyId: string; createdAt: string; isActive: boolean }>;
+	}
+> {
+	return {
+		name: "system.audit.keys.list",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			activeKeyId: activeAuditSigningKeyId,
+			keys: [...auditSigningKeys.values()].map((item) => ({
+				keyId: item.keyId,
+				createdAt: item.createdAt,
+				isActive: item.keyId === activeAuditSigningKeyId,
+			})),
+		}),
+	};
+}
+
+export function createSystemAuditKeysActivateService(): OSService<
+	{ keyId: string },
+	{ activated: boolean; activeKeyId: string }
+> {
+	return {
+		name: "system.audit.keys.activate",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			if (auditSigningKeys.has(req.keyId)) {
+				activeAuditSigningKeyId = req.keyId;
+				return { activated: true, activeKeyId: activeAuditSigningKeyId };
+			}
+			return { activated: false, activeKeyId: activeAuditSigningKeyId };
 		},
 	};
 }
@@ -2373,8 +2469,170 @@ export function createSystemQuotaAdjustService(
 	};
 }
 
+export interface TenantQuotaPolicyRule {
+	id: string;
+	tier: "free" | "pro" | "enterprise";
+	priority: "low" | "normal" | "high";
+	loadMin?: number;
+	loadMax?: number;
+	hourStart?: number;
+	hourEnd?: number;
+	quota: {
+		maxToolCalls: number;
+		maxTokens: number;
+	};
+}
+
+const quotaPolicies = new Map<string, TenantQuotaPolicyRule>();
+
+export function createSystemQuotaPolicyUpsertService(): OSService<
+	{ policy: TenantQuotaPolicyRule },
+	{ policy: TenantQuotaPolicyRule }
+> {
+	return {
+		name: "system.quota.policy.upsert",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			quotaPolicies.set(req.policy.id, req.policy);
+			return { policy: req.policy };
+		},
+	};
+}
+
+export function createSystemQuotaPolicyListService(): OSService<Record<string, never>, { policies: TenantQuotaPolicyRule[] }> {
+	return {
+		name: "system.quota.policy.list",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			policies: [...quotaPolicies.values()],
+		}),
+	};
+}
+
+export function createSystemQuotaPolicyApplyService(
+	tenantGovernor: TenantQuotaGovernor,
+): OSService<
+	{
+		tenantId: string;
+		tier: "free" | "pro" | "enterprise";
+		priority: "low" | "normal" | "high";
+		loadFactor: number;
+		hour?: number;
+	},
+	{
+		matchedPolicyId?: string;
+		quota?: {
+			maxToolCalls: number;
+			maxTokens: number;
+		};
+	}
+> {
+	return {
+		name: "system.quota.policy.apply",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			const hour = req.hour ?? new Date().getHours();
+			const matched = [...quotaPolicies.values()].find((policy) => {
+				if (policy.tier !== req.tier) return false;
+				if (policy.priority !== req.priority) return false;
+				if (policy.loadMin !== undefined && req.loadFactor < policy.loadMin) return false;
+				if (policy.loadMax !== undefined && req.loadFactor > policy.loadMax) return false;
+				if (policy.hourStart !== undefined && hour < policy.hourStart) return false;
+				if (policy.hourEnd !== undefined && hour > policy.hourEnd) return false;
+				return true;
+			});
+			if (!matched) {
+				return {};
+			}
+			tenantGovernor.setQuota(req.tenantId, {
+				maxToolCalls: matched.quota.maxToolCalls,
+				maxTokens: matched.quota.maxTokens,
+			});
+			return {
+				matchedPolicyId: matched.id,
+				quota: tenantGovernor.getQuota(req.tenantId),
+			};
+		},
+	};
+}
+
+export function createSystemQuotaHotspotsService(
+	tenantGovernor: TenantQuotaGovernor,
+): OSService<
+	{
+		thresholdToolCalls: number;
+		limit?: number;
+	},
+	{
+		hotspots: Array<{ tenantId: string; toolCalls: number; tokens: number }>;
+	}
+> {
+	return {
+		name: "system.quota.hotspots",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const limit = req.limit && req.limit > 0 ? req.limit : 10;
+			const hotspots = Object.entries(tenantGovernor.listUsage())
+				.filter(([, usage]) => usage.toolCalls >= req.thresholdToolCalls)
+				.map(([tenantId, usage]) => ({
+					tenantId,
+					toolCalls: usage.toolCalls,
+					tokens: usage.tokens,
+				}))
+				.sort((a, b) => b.toolCalls - a.toolCalls)
+				.slice(0, limit);
+			return { hotspots };
+		},
+	};
+}
+
+export function createSystemQuotaHotspotsIsolateService(
+	tenantGovernor: TenantQuotaGovernor,
+): OSService<
+	{
+		thresholdToolCalls: number;
+		reductionFactor?: number;
+	},
+	{
+		isolated: Array<{
+			tenantId: string;
+			before?: { maxToolCalls: number; maxTokens: number };
+			after?: { maxToolCalls: number; maxTokens: number };
+		}>;
+	}
+> {
+	return {
+		name: "system.quota.hotspots.isolate",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			const reductionFactor = req.reductionFactor && req.reductionFactor > 0 ? req.reductionFactor : 0.5;
+			const usage = tenantGovernor.listUsage();
+			const isolated: Array<{
+				tenantId: string;
+				before?: { maxToolCalls: number; maxTokens: number };
+				after?: { maxToolCalls: number; maxTokens: number };
+			}> = [];
+			for (const [tenantId, currentUsage] of Object.entries(usage)) {
+				if (currentUsage.toolCalls < req.thresholdToolCalls) continue;
+				const before = tenantGovernor.getQuota(tenantId);
+				if (!before) continue;
+				tenantGovernor.setQuota(tenantId, {
+					maxToolCalls: Math.max(1, Math.floor(before.maxToolCalls * reductionFactor)),
+					maxTokens: Math.max(100, Math.floor(before.maxTokens * reductionFactor)),
+				});
+				isolated.push({
+					tenantId,
+					before,
+					after: tenantGovernor.getQuota(tenantId),
+				});
+			}
+			return { isolated };
+		},
+	};
+}
+
 export interface SystemChaosRunRequest {
-	scenario: "policy_denied" | "scheduler_failure" | "alert_storm";
+	scenario: "policy_denied" | "scheduler_failure" | "alert_storm" | "scheduler_replay";
 }
 
 export interface SystemChaosRunResponse {
@@ -2431,6 +2689,25 @@ export function createSystemChaosRunService(
 					},
 				};
 			}
+			if (req.scenario === "scheduler_replay") {
+				const id = `chaos-replay-${Date.now()}`;
+				schedulerService.scheduleRetryable(
+					id,
+					async () => {
+						throw new Error("chaos-replay-failure");
+					},
+					{ maxRetries: 0, backoffMs: 1 },
+				);
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				const replayed = schedulerService.replayFailure(id);
+				return {
+					scenario: req.scenario,
+					passed: replayed,
+					details: {
+						replayed,
+					},
+				};
+			}
 			const before = notificationService.getStats();
 			notificationService.send({ topic: "system.alert", message: "chaos-a", severity: "critical" });
 			notificationService.send({ topic: "system.alert", message: "chaos-b", severity: "critical" });
@@ -2442,6 +2719,116 @@ export function createSystemChaosRunService(
 					before,
 					after,
 				},
+			};
+		},
+	};
+}
+
+const chaosBaselines = new Map<
+	string,
+	{
+		capturedAt: string;
+		total: number;
+		failure: number;
+		errorRate: number;
+	}
+>();
+
+export function createSystemChaosBaselineCaptureService(
+	kernel: LLMOSKernel,
+): OSService<
+	{
+		name: string;
+	},
+	{
+		name: string;
+		baseline: {
+			capturedAt: string;
+			total: number;
+			failure: number;
+			errorRate: number;
+		};
+	}
+> {
+	return {
+		name: "system.chaos.baseline.capture",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			const metrics = kernel.metrics.allSnapshots();
+			const total = metrics.reduce((sum, item) => sum + item.total, 0);
+			const failure = metrics.reduce((sum, item) => sum + item.failure, 0);
+			const baseline = {
+				capturedAt: new Date().toISOString(),
+				total,
+				failure,
+				errorRate: total === 0 ? 0 : failure / total,
+			};
+			chaosBaselines.set(req.name, baseline);
+			return {
+				name: req.name,
+				baseline,
+			};
+		},
+	};
+}
+
+export function createSystemChaosBaselineVerifyService(
+	kernel: LLMOSKernel,
+): OSService<
+	{
+		name: string;
+		maxErrorRateDelta?: number;
+		maxFailureDelta?: number;
+	},
+	{
+		name: string;
+		passed: boolean;
+		reason?: string;
+		current: {
+			total: number;
+			failure: number;
+			errorRate: number;
+		};
+		baseline?: {
+			capturedAt: string;
+			total: number;
+			failure: number;
+			errorRate: number;
+		};
+	}
+> {
+	return {
+		name: "system.chaos.baseline.verify",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const baseline = chaosBaselines.get(req.name);
+			const metrics = kernel.metrics.allSnapshots();
+			const total = metrics.reduce((sum, item) => sum + item.total, 0);
+			const failure = metrics.reduce((sum, item) => sum + item.failure, 0);
+			const current = {
+				total,
+				failure,
+				errorRate: total === 0 ? 0 : failure / total,
+			};
+			if (!baseline) {
+				return {
+					name: req.name,
+					passed: false,
+					reason: "baseline_not_found",
+					current,
+				};
+			}
+			const maxErrorRateDelta = req.maxErrorRateDelta ?? 0.05;
+			const maxFailureDelta = req.maxFailureDelta ?? 10;
+			const errorRateDelta = current.errorRate - baseline.errorRate;
+			const failureDelta = current.failure - baseline.failure;
+			const passed = errorRateDelta <= maxErrorRateDelta && failureDelta <= maxFailureDelta;
+			return {
+				name: req.name,
+				passed,
+				reason: passed ? undefined : "baseline_regression",
+				current,
+				baseline,
 			};
 		},
 	};

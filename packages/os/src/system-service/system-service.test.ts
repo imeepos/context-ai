@@ -50,9 +50,19 @@ import {
 	createSystemSLORulesListService,
 	createSystemSLORulesEvaluateService,
 	createSystemAuditExportService,
+	createSystemAuditKeysRotateService,
+	createSystemAuditKeysListService,
+	createSystemAuditKeysActivateService,
 	createSystemQuotaService,
 	createSystemQuotaAdjustService,
+	createSystemQuotaPolicyUpsertService,
+	createSystemQuotaPolicyListService,
+	createSystemQuotaPolicyApplyService,
+	createSystemQuotaHotspotsService,
+	createSystemQuotaHotspotsIsolateService,
 	createSystemChaosRunService,
+	createSystemChaosBaselineCaptureService,
+	createSystemChaosBaselineVerifyService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -1225,6 +1235,26 @@ describe("SystemService", () => {
 		expect(security.verify(response.content, "k1", response.signature)).toBe(true);
 	});
 
+	it("rotates and activates audit signing keys", async () => {
+		const rotate = createSystemAuditKeysRotateService();
+		const list = createSystemAuditKeysListService();
+		const activate = createSystemAuditKeysActivateService();
+		await rotate.execute(
+			{ keyId: "k-2026-01", secret: "secret-1", setActive: true },
+			{ appId: "app.demo", sessionId: "s37b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const listed = await list.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s37b", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(listed.activeKeyId).toBe("k-2026-01");
+		const switched = await activate.execute(
+			{ keyId: "default" },
+			{ appId: "app.demo", sessionId: "s37b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(switched.activated).toBe(true);
+	});
+
 	it("adjusts dynamic tenant quota", async () => {
 		const governor = new TenantQuotaGovernor();
 		governor.setQuota("tenant-1", { maxToolCalls: 100, maxTokens: 1000 });
@@ -1246,6 +1276,66 @@ describe("SystemService", () => {
 		expect(after.quota?.maxToolCalls).toBeLessThan(100);
 	});
 
+	it("applies quota policy center and isolates hotspots", async () => {
+		const governor = new TenantQuotaGovernor();
+		governor.setQuota("tenant-pro", { maxToolCalls: 200, maxTokens: 20000 });
+		const policyUpsert = createSystemQuotaPolicyUpsertService();
+		const policyList = createSystemQuotaPolicyListService();
+		const policyApply = createSystemQuotaPolicyApplyService(governor);
+		await policyUpsert.execute(
+			{
+				policy: {
+					id: "pro-peak",
+					tier: "pro",
+					priority: "high",
+					loadMin: 0.8,
+					quota: { maxToolCalls: 80, maxTokens: 8000 },
+				},
+			},
+			{ appId: "app.demo", sessionId: "s38b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const policies = await policyList.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s38b", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(policies.policies.some((item) => item.id === "pro-peak")).toBe(true);
+		const applied = await policyApply.execute(
+			{ tenantId: "tenant-pro", tier: "pro", priority: "high", loadFactor: 0.9 },
+			{ appId: "app.demo", sessionId: "s38b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(applied.matchedPolicyId).toBe("pro-peak");
+
+		for (let i = 0; i < 25; i += 1) {
+			try {
+				governor.beforeExecute({
+					serviceName: "store.set",
+					context: {
+						appId: "app.demo",
+						sessionId: "s38b",
+						tenantId: "tenant-pro",
+						permissions: [],
+						workingDirectory: process.cwd(),
+					},
+					request: { i },
+				});
+			} catch {
+				break;
+			}
+		}
+		const hotspotsService = createSystemQuotaHotspotsService(governor);
+		const hotspots = await hotspotsService.execute(
+			{ thresholdToolCalls: 10, limit: 5 },
+			{ appId: "app.demo", sessionId: "s38b", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(hotspots.hotspots.some((item) => item.tenantId === "tenant-pro")).toBe(true);
+		const isolateService = createSystemQuotaHotspotsIsolateService(governor);
+		const isolated = await isolateService.execute(
+			{ thresholdToolCalls: 10, reductionFactor: 0.5 },
+			{ appId: "app.demo", sessionId: "s38b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(isolated.isolated.some((item) => item.tenantId === "tenant-pro")).toBe(true);
+	});
+
 	it("runs chaos drills", async () => {
 		vi.useFakeTimers();
 		const kernel = new LLMOSKernel();
@@ -1265,6 +1355,24 @@ describe("SystemService", () => {
 		await vi.advanceTimersByTimeAsync(20);
 		const schedulerDrill = await schedulerDrillPromise;
 		expect(schedulerDrill.passed).toBe(true);
+		const replayDrillPromise = service.execute(
+			{ scenario: "scheduler_replay" },
+			{ appId: "app.demo", sessionId: "s39", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		await vi.advanceTimersByTimeAsync(20);
+		const replayDrill = await replayDrillPromise;
+		expect(replayDrill.passed).toBe(true);
+		const baselineCapture = createSystemChaosBaselineCaptureService(kernel);
+		const baselineVerify = createSystemChaosBaselineVerifyService(kernel);
+		await baselineCapture.execute(
+			{ name: "default" },
+			{ appId: "app.demo", sessionId: "s39", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const baselineResult = await baselineVerify.execute(
+			{ name: "default", maxErrorRateDelta: 1, maxFailureDelta: 100 },
+			{ appId: "app.demo", sessionId: "s39", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(baselineResult.passed).toBe(true);
 		vi.useRealTimers();
 	});
 });

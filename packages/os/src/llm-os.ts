@@ -117,9 +117,19 @@ import {
 	createSystemSLORulesListService,
 	createSystemSLORulesEvaluateService,
 	createSystemAuditExportService,
+	createSystemAuditKeysRotateService,
+	createSystemAuditKeysListService,
+	createSystemAuditKeysActivateService,
 	createSystemQuotaService,
 	createSystemQuotaAdjustService,
+	createSystemQuotaPolicyUpsertService,
+	createSystemQuotaPolicyListService,
+	createSystemQuotaPolicyApplyService,
+	createSystemQuotaHotspotsService,
+	createSystemQuotaHotspotsIsolateService,
 	createSystemChaosRunService,
+	createSystemChaosBaselineCaptureService,
+	createSystemChaosBaselineVerifyService,
 	createSystemTopologyService,
 } from "./system-service/index.js";
 import type { OSService, PathPolicyRule } from "./types/os.js";
@@ -300,6 +310,9 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.dependencies", () => createSystemDependenciesService(kernel));
 	registerWhenEnabled("system.metrics", () => createSystemMetricsService(kernel));
 	registerWhenEnabled("system.audit", () => createSystemAuditService(kernel));
+	registerWhenEnabled("system.audit.keys.rotate", () => createSystemAuditKeysRotateService());
+	registerWhenEnabled("system.audit.keys.list", () => createSystemAuditKeysListService());
+	registerWhenEnabled("system.audit.keys.activate", () => createSystemAuditKeysActivateService());
 	registerWhenEnabled("system.topology", () => createSystemTopologyService(kernel));
 	registerWhenEnabled("system.events", () => createSystemEventsService(kernel));
 	registerWhenEnabled("system.capabilities", () => createSystemCapabilitiesService(kernel));
@@ -356,7 +369,16 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.audit.export", () => createSystemAuditExportService(kernel, securityService));
 	registerWhenEnabled("system.quota", () => createSystemQuotaService(tenantQuotaGovernor));
 	registerWhenEnabled("system.quota.adjust", () => createSystemQuotaAdjustService(tenantQuotaGovernor));
+	registerWhenEnabled("system.quota.policy.upsert", () => createSystemQuotaPolicyUpsertService());
+	registerWhenEnabled("system.quota.policy.list", () => createSystemQuotaPolicyListService());
+	registerWhenEnabled("system.quota.policy.apply", () => createSystemQuotaPolicyApplyService(tenantQuotaGovernor));
+	registerWhenEnabled("system.quota.hotspots", () => createSystemQuotaHotspotsService(tenantQuotaGovernor));
+	registerWhenEnabled("system.quota.hotspots.isolate", () =>
+		createSystemQuotaHotspotsIsolateService(tenantQuotaGovernor),
+	);
 	registerWhenEnabled("system.chaos.run", () => createSystemChaosRunService(kernel, notificationService, schedulerService));
+	registerWhenEnabled("system.chaos.baseline.capture", () => createSystemChaosBaselineCaptureService(kernel));
+	registerWhenEnabled("system.chaos.baseline.verify", () => createSystemChaosBaselineVerifyService(kernel));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

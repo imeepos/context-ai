@@ -117,6 +117,18 @@ export class TenantQuotaGovernor implements ResourceGovernor {
 		return this.usage.get(tenantId) ?? { toolCalls: 0, tokens: 0 };
 	}
 
+	listUsage(): Record<string, TenantUsage> {
+		return Object.fromEntries(
+			[...this.usage.entries()].map(([tenantId, usage]) => [tenantId, { ...usage }]),
+		);
+	}
+
+	listQuotas(): Record<string, TenantQuota> {
+		return Object.fromEntries(
+			[...this.quotas.entries()].map(([tenantId, quota]) => [tenantId, { ...quota }]),
+		);
+	}
+
 	getQuota(tenantId: string): TenantQuota | undefined {
 		const quota = this.quotas.get(tenantId);
 		if (!quota) return undefined;

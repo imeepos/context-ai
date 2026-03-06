@@ -373,6 +373,13 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(auditExport.compressed).toBe(true);
+			await os.kernel.execute(
+				"system.audit.keys.rotate",
+				{ keyId: "k-demo", secret: "secret-demo", setActive: true },
+				context,
+			);
+			const auditKeys = await os.kernel.execute("system.audit.keys.list", {}, context);
+			expect(auditKeys.activeKeyId).toBe("k-demo");
 			os.tenantQuotaGovernor.setQuota("tenant-a", { maxToolCalls: 100, maxTokens: 10000 });
 			const quotaNow = await os.kernel.execute(
 				"system.quota",
@@ -386,12 +393,55 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(quotaAdjusted.tenantId).toBe("tenant-a");
+			await os.kernel.execute(
+				"system.quota.policy.upsert",
+				{
+					policy: {
+						id: "tenant-a-peak",
+						tier: "enterprise",
+						priority: "high",
+						loadMin: 0.8,
+						quota: { maxToolCalls: 50, maxTokens: 5000 },
+					},
+				},
+				context,
+			);
+			const quotaPolicyList = await os.kernel.execute("system.quota.policy.list", {}, context);
+			expect(quotaPolicyList.policies.some((p: { id: string }) => p.id === "tenant-a-peak")).toBe(true);
+			const quotaPolicyApply = await os.kernel.execute(
+				"system.quota.policy.apply",
+				{
+					tenantId: "tenant-a",
+					tier: "enterprise",
+					priority: "high",
+					loadFactor: 0.9,
+				},
+				context,
+			);
+			expect(typeof quotaPolicyApply.matchedPolicyId === "string" || quotaPolicyApply.matchedPolicyId === undefined).toBe(
+				true,
+			);
+			const quotaHotspots = await os.kernel.execute("system.quota.hotspots", { thresholdToolCalls: 1 }, context);
+			expect(Array.isArray(quotaHotspots.hotspots)).toBe(true);
 			const chaos = await os.kernel.execute(
 				"system.chaos.run",
 				{ scenario: "policy_denied" },
 				context,
 			);
 			expect(chaos.passed).toBe(true);
+			const chaosReplay = await os.kernel.execute(
+				"system.chaos.run",
+				{ scenario: "scheduler_replay" },
+				context,
+			);
+			expect(typeof chaosReplay.passed).toBe("boolean");
+			await os.kernel.execute("system.chaos.baseline.capture", { name: "default" }, context);
+			const baseline = await os.kernel.execute(
+				"system.chaos.baseline.verify",
+				{ name: "default", maxErrorRateDelta: 1, maxFailureDelta: 100 },
+				context,
+			);
+			expect(typeof baseline.passed).toBe("boolean");
 			const schedulerState = await os.kernel.execute("scheduler.state.export", {}, context);
 			expect(Array.isArray(schedulerState.tasks)).toBe(true);
 			const schedulerPersist = await os.kernel.execute("scheduler.state.persist", {}, context);
