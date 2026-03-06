@@ -28,6 +28,7 @@ import {
 	createSystemAlertsReportService,
 	createSystemAlertsReportCompactService,
 	createSystemAlertsFlappingService,
+	createSystemAlertsTimelineService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -721,6 +722,34 @@ describe("SystemService", () => {
 		);
 		expect(response.total).toBe(1);
 		expect(response.items[0]?.message).toBe("db down");
+		vi.useRealTimers();
+	});
+
+	it("returns alerts timeline buckets", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "t1", severity: "critical" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:30.000Z"));
+		notification.send({ topic: "system.alert", message: "t2", severity: "error" });
+		vi.setSystemTime(new Date("2026-01-01T00:01:10.000Z"));
+		notification.send({ topic: "system.alert", message: "t3", severity: "warning" });
+		vi.setSystemTime(new Date("2026-01-01T00:02:00.000Z"));
+
+		const service = createSystemAlertsTimelineService(notification);
+		const response = await service.execute(
+			{ windowMinutes: 2, bucketMinutes: 1, topic: "system.alert" },
+			{
+				appId: "app.demo",
+				sessionId: "s26",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.buckets.length).toBe(2);
+		expect(response.buckets[0]?.total).toBe(2);
+		expect(response.buckets[1]?.total).toBe(1);
 		vi.useRealTimers();
 	});
 });
