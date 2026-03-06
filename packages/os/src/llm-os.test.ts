@@ -239,6 +239,12 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(Array.isArray(hotspots.items)).toBe(true);
+			const recommendations = await os.kernel.execute(
+				"system.alerts.recommendations",
+				{ topic: "system.alert", windowMinutes: 10 },
+				context,
+			);
+			expect(recommendations.recommendations.length).toBeGreaterThan(0);
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(

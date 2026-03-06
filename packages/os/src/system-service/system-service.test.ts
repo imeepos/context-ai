@@ -30,6 +30,7 @@ import {
 	createSystemAlertsFlappingService,
 	createSystemAlertsTimelineService,
 	createSystemAlertsHotspotsService,
+	createSystemAlertsRecommendationsService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -783,6 +784,31 @@ describe("SystemService", () => {
 		expect(response.items[0]?.currentCount).toBe(2);
 		expect(response.items[0]?.previousCount).toBe(1);
 		expect(response.items[0]?.delta).toBe(1);
+		vi.useRealTimers();
+	});
+
+	it("returns actionable alert recommendations", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "disk high", severity: "warning" });
+		vi.setSystemTime(new Date("2026-01-01T00:02:00.000Z"));
+
+		const service = createSystemAlertsRecommendationsService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", windowMinutes: 5 },
+			{
+				appId: "app.demo",
+				sessionId: "s28",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.recommendations.length).toBeGreaterThan(0);
+		expect(response.recommendations[0]?.title.length).toBeGreaterThan(0);
 		vi.useRealTimers();
 	});
 });
