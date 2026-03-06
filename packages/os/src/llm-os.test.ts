@@ -205,6 +205,12 @@ describe("createDefaultLLMOS", () => {
 			expect(typeof alertsTopics.topics).toBe("object");
 			const alertsPolicy = await os.kernel.execute("system.alerts.policy", {}, context);
 			expect(typeof alertsPolicy.policy.dedupeWindowMs).toBe("number");
+			const updatedPolicy = await os.kernel.execute(
+				"notification.policy.update",
+				{ dedupeWindowMs: 1234 },
+				context,
+			);
+			expect(updatedPolicy.policy.dedupeWindowMs).toBe(1234);
 			const alertsTrends = await os.kernel.execute("system.alerts.trends", { windowMinutes: 10 }, context);
 			expect(typeof alertsTrends.total).toBe("number");
 			const alertsSLO = await os.kernel.execute("system.alerts.slo", {}, context);

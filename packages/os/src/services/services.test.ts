@@ -508,4 +508,20 @@ describe("NotificationService", () => {
 		expect(list[0]?.message).toBe("r2");
 		expect(list[1]?.message).toBe("r3");
 	});
+
+	it("updates notification policy at runtime", () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			dedupeWindowMs: 0,
+		});
+		notification.updatePolicy({
+			dedupeWindowMs: 1000,
+			rateLimit: { limit: 1, windowMs: 1000 },
+			retentionLimit: 2,
+		});
+		const policy = notification.getPolicy();
+		expect(policy.dedupeWindowMs).toBe(1000);
+		expect(policy.rateLimit?.limit).toBe(1);
+		expect(policy.retentionLimit).toBe(2);
+	});
 });

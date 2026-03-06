@@ -34,6 +34,7 @@ import {
 	createNotificationAckService,
 	createNotificationAckAllService,
 	createNotificationCleanupService,
+	createNotificationPolicyUpdateService,
 	createNotificationMuteListService,
 	createNotificationMuteService,
 	createNotificationSendService,
@@ -243,6 +244,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("notification.ack", () => createNotificationAckService(notificationService));
 	registerWhenEnabled("notification.ackAll", () => createNotificationAckAllService(notificationService));
 	registerWhenEnabled("notification.cleanup", () => createNotificationCleanupService(notificationService));
+	registerWhenEnabled("notification.policy.update", () => createNotificationPolicyUpdateService(notificationService));
 	registerWhenEnabled("notification.list", () => createNotificationListService(notificationService));
 	registerWhenEnabled("notification.mute", () => createNotificationMuteService(notificationService));
 	registerWhenEnabled("notification.mute.list", () => createNotificationMuteListService(notificationService));

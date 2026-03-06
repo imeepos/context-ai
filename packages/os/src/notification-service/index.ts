@@ -27,6 +27,15 @@ export interface NotificationServiceOptions {
 	retentionLimit?: number;
 }
 
+export interface NotificationPolicyPatch {
+	dedupeWindowMs?: number;
+	rateLimit?: {
+		limit: number;
+		windowMs: number;
+	};
+	retentionLimit?: number;
+}
+
 export interface NotificationRecord {
 	id: string;
 	topic: string;
@@ -98,11 +107,25 @@ export class NotificationService {
 		},
 		byTopic: {},
 	};
+	private policy: {
+		dedupeWindowMs: number;
+		rateLimit?: {
+			limit: number;
+			windowMs: number;
+		};
+		retentionLimit?: number;
+	};
 
 	constructor(
 		private readonly eventBus: EventBus,
-		private readonly options: NotificationServiceOptions = {},
-	) {}
+		options: NotificationServiceOptions = {},
+	) {
+		this.policy = {
+			dedupeWindowMs: options.dedupeWindowMs ?? 0,
+			rateLimit: options.rateLimit,
+			retentionLimit: options.retentionLimit,
+		};
+	}
 
 	send(request: NotifyRequest): boolean {
 		if (this.isTopicMuted(request.topic)) {
@@ -115,7 +138,7 @@ export class NotificationService {
 			this.recordDrop(request.topic, "rateLimited");
 			return false;
 		}
-		const dedupeWindowMs = this.options.dedupeWindowMs ?? 0;
+		const dedupeWindowMs = this.policy.dedupeWindowMs;
 		if (dedupeWindowMs > 0) {
 			const key = `${request.topic}::${severity}::${request.message}`;
 			const now = Date.now();
@@ -134,7 +157,7 @@ export class NotificationService {
 			acknowledged: false,
 			timestamp: new Date().toISOString(),
 		});
-		const retentionLimit = this.options.retentionLimit;
+		const retentionLimit = this.policy.retentionLimit;
 		if (retentionLimit && retentionLimit > 0 && this.sent.length > retentionLimit) {
 			const overflow = this.sent.length - retentionLimit;
 			this.sent.splice(0, overflow);
@@ -296,10 +319,34 @@ export class NotificationService {
 		retentionLimit?: number;
 	} {
 		return {
-			dedupeWindowMs: this.options.dedupeWindowMs ?? 0,
-			rateLimit: this.options.rateLimit,
-			retentionLimit: this.options.retentionLimit,
+			dedupeWindowMs: this.policy.dedupeWindowMs,
+			rateLimit: this.policy.rateLimit,
+			retentionLimit: this.policy.retentionLimit,
 		};
+	}
+
+	updatePolicy(patch: NotificationPolicyPatch): ReturnType<NotificationService["getPolicy"]> {
+		if (patch.dedupeWindowMs !== undefined && patch.dedupeWindowMs >= 0) {
+			this.policy.dedupeWindowMs = patch.dedupeWindowMs;
+		}
+		if (patch.rateLimit !== undefined) {
+			if (patch.rateLimit.limit > 0 && patch.rateLimit.windowMs > 0) {
+				this.policy.rateLimit = patch.rateLimit;
+			} else {
+				this.policy.rateLimit = undefined;
+			}
+		}
+		if (patch.retentionLimit !== undefined) {
+			if (patch.retentionLimit > 0) {
+				this.policy.retentionLimit = patch.retentionLimit;
+				if (this.sent.length > patch.retentionLimit) {
+					this.sent.splice(0, this.sent.length - patch.retentionLimit);
+				}
+			} else {
+				this.policy.retentionLimit = undefined;
+			}
+		}
+		return this.getPolicy();
 	}
 
 	private isTopicMuted(topic: string): boolean {
@@ -311,7 +358,7 @@ export class NotificationService {
 	}
 
 	private isWithinRateLimit(topic: string): boolean {
-		const limitRule = this.options.rateLimit;
+		const limitRule = this.policy.rateLimit;
 		if (!limitRule) return true;
 		const now = Date.now();
 		const windowStart = now - limitRule.windowMs;
@@ -450,5 +497,17 @@ export function createNotificationCleanupService(
 		name: "notification.cleanup",
 		requiredPermissions: ["notification:write"],
 		execute: async (req) => notification.cleanup(req),
+	};
+}
+
+export function createNotificationPolicyUpdateService(
+	notification: NotificationService,
+): OSService<NotificationPolicyPatch, { policy: ReturnType<NotificationService["getPolicy"]> }> {
+	return {
+		name: "notification.policy.update",
+		requiredPermissions: ["notification:write"],
+		execute: async (req) => ({
+			policy: notification.updatePolicy(req),
+		}),
 	};
 }
