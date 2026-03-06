@@ -2,6 +2,14 @@
 
 LLM 驱动的 OS 能力层，面向 CTP 框架提供统一的系统服务编排。
 
+## 破坏性变更（2026-03-06）
+- 已移除遗留源码目录：`src/bash`、`src/file-manager`
+- 已移除旧入口导出：`./bash/*`、`./file-manager/*`
+- 统一迁移到服务化接口：
+  - 文件能力：`FileService` + `file.read/file.write/file.list/file.find/file.grep/file.edit`
+  - Shell 能力：`ShellService` + `shell.execute/shell.env.set/shell.env.unset/shell.env.list`
+- `build` 已改为“先清理 `dist` 再编译”，防止旧产物残留到发布包
+
 ## 当前能力
 - 内核治理：`service-registry`（含 `registerMany` 批量依赖解析）、`policy-engine`、`audit-log`、`logger`、`metrics`
 - 应用管理：`app.install / app.upgrade / app.list / app.state.set / app.disable / app.enable / app.uninstall`

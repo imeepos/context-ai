@@ -123,9 +123,7 @@
 - 约束：遵循真实操作系统“上层依赖下层”的原则，适配 CTP 的工具调用模型与跨运行时特性。
 
 ## 1. 现状基线（Current Baseline）
-- 当前入口 `src/index.ts` 仅导出：
-1. `file-manager`
-2. `bash`
+- 当前入口 `src/index.ts` 已统一导出系统化服务（`app/file/shell/net/store/system/scheduler/security/notification/...`），不再导出遗留 `file-manager/bash` 模块。
 - 已有基础能力：
 1. 文件工具：`read / write / ls / find / grep / edit`
 2. 命令执行：`bash`（带超时、中止、输出截断、临时日志）
@@ -344,9 +342,9 @@ packages/os/src
   index.ts
 ```
 
-入口导出建议：
-1. 先保留向后兼容导出（现有 `file-manager`、`bash`）
-2. 新增 `createLLMOSKernel()` 工厂
+入口导出建议（已实现）：
+1. 仅保留系统化服务导出，移除 `file-manager`、`bash` 兼容导出
+2. 提供默认工厂 `createDefaultLLMOS()`
 3. 工厂支持按配置启停服务
 
 ## 10. 里程碑（Roadmap）
@@ -377,5 +375,5 @@ M4: 高级能力（P2）
 
 ## 12. 下一步实施顺序（建议）
 1. 先实现 `kernel + app-manager`，建立治理中枢
-2. 将现有 `file-manager/bash` 迁入 `file-service/shell-service` 并适配统一上下文
+2. 将现有 `file-manager/bash` 迁入 `file-service/shell-service` 并适配统一上下文（已完成并移除遗留目录）
 3. 补齐 `PolicyEngine + Audit`，再扩展网络与存储服务
