@@ -2310,6 +2310,9 @@ export function createSystemAuditExportService(
 		name: "system.audit.export",
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
+			if (req.format && req.format !== "jsonl") {
+				throw new Error(`Unsupported audit export format: ${req.format}`);
+			}
 			let records = kernel.audit.list();
 			if (req.since) {
 				const since = Date.parse(req.since);
@@ -2571,9 +2574,10 @@ export function createSystemQuotaHotspotsService(
 		name: "system.quota.hotspots",
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
+			const thresholdToolCalls = req.thresholdToolCalls > 0 ? req.thresholdToolCalls : 10;
 			const limit = req.limit && req.limit > 0 ? req.limit : 10;
 			const hotspots = Object.entries(tenantGovernor.listUsage())
-				.filter(([, usage]) => usage.toolCalls >= req.thresholdToolCalls)
+				.filter(([, usage]) => usage.toolCalls >= thresholdToolCalls)
 				.map(([tenantId, usage]) => ({
 					tenantId,
 					toolCalls: usage.toolCalls,
@@ -2606,6 +2610,7 @@ export function createSystemQuotaHotspotsIsolateService(
 		requiredPermissions: ["system:write"],
 		execute: async (req) => {
 			const reductionFactor = req.reductionFactor && req.reductionFactor > 0 ? req.reductionFactor : 0.5;
+			const thresholdToolCalls = req.thresholdToolCalls > 0 ? req.thresholdToolCalls : 10;
 			const usage = tenantGovernor.listUsage();
 			const isolated: Array<{
 				tenantId: string;
@@ -2613,7 +2618,7 @@ export function createSystemQuotaHotspotsIsolateService(
 				after?: { maxToolCalls: number; maxTokens: number };
 			}> = [];
 			for (const [tenantId, currentUsage] of Object.entries(usage)) {
-				if (currentUsage.toolCalls < req.thresholdToolCalls) continue;
+				if (currentUsage.toolCalls < thresholdToolCalls) continue;
 				const before = tenantGovernor.getQuota(tenantId);
 				if (!before) continue;
 				tenantGovernor.setQuota(tenantId, {

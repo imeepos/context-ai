@@ -1233,6 +1233,12 @@ describe("SystemService", () => {
 		expect(response.exported).toBeGreaterThan(0);
 		expect(response.compressed).toBe(true);
 		expect(security.verify(response.content, "k1", response.signature)).toBe(true);
+		await expect(
+			service.execute(
+				{ format: "xml" as "jsonl" },
+				{ appId: "app.demo", sessionId: "s37", permissions: ["system:read"], workingDirectory: process.cwd() },
+			),
+		).rejects.toThrow("Unsupported audit export format");
 	});
 
 	it("rotates and activates audit signing keys", async () => {
@@ -1328,6 +1334,11 @@ describe("SystemService", () => {
 			{ appId: "app.demo", sessionId: "s38b", permissions: ["system:read"], workingDirectory: process.cwd() },
 		);
 		expect(hotspots.hotspots.some((item) => item.tenantId === "tenant-pro")).toBe(true);
+		const hotspotsDefault = await hotspotsService.execute(
+			{ thresholdToolCalls: 0, limit: 5 },
+			{ appId: "app.demo", sessionId: "s38b", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(Array.isArray(hotspotsDefault.hotspots)).toBe(true);
 		const isolateService = createSystemQuotaHotspotsIsolateService(governor);
 		const isolated = await isolateService.execute(
 			{ thresholdToolCalls: 10, reductionFactor: 0.5 },
