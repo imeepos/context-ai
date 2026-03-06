@@ -8,6 +8,7 @@ import { AppRouteRegistry } from "./route-registry.js";
 import { OSError } from "../kernel/errors.js";
 import type { OSService } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
+import { randomUUID } from "node:crypto";
 
 export class AppManager {
 	readonly registry = new AppRegistry();
@@ -201,7 +202,7 @@ export function createAppInstallService(
 					.filter((route) => !previous?.entry.pages.some((item) => item.route === route)),
 				addedPolicies: next.permissions.filter((permission) => !previous?.permissions.includes(permission)),
 				addedObservability: [`audit:${next.id}`, `metrics:${next.id}`, `events:${next.id}`],
-				rollbackToken: `${next.id}@${next.version}:${Date.now()}`,
+				rollbackToken: `${next.id}@${next.version}:${randomUUID()}`,
 			};
 			manager.setInstallReport(report);
 			manager.setRollbackSnapshot(report.rollbackToken, {
