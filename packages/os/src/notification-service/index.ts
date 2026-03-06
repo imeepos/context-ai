@@ -25,6 +25,10 @@ export interface NotificationServiceOptions {
 		windowMs: number;
 	};
 	retentionLimit?: number;
+	channelDelivery?: {
+		retries: number;
+		backoffMs: number;
+	};
 }
 
 export interface NotificationPolicyPatch {
@@ -92,11 +96,25 @@ export interface NotificationStats {
 	>;
 }
 
+export interface NotificationChannelAdapter {
+	name: string;
+	send(record: NotificationRecord): Promise<void> | void;
+}
+
 export class NotificationService {
 	private readonly sent: NotificationRecord[] = [];
 	private readonly lastSentAt = new Map<string, number>();
 	private readonly topicMuteUntil = new Map<string, number>();
 	private readonly topicSendTimes = new Map<string, number[]>();
+	private readonly channelAdapters = new Map<string, NotificationChannelAdapter>();
+	private readonly channelStats = new Map<
+		string,
+		{
+			success: number;
+			failure: number;
+			retried: number;
+		}
+	>();
 	private sequence = 0;
 	private readonly stats: NotificationStats = {
 		sent: 0,
@@ -115,6 +133,10 @@ export class NotificationService {
 		};
 		retentionLimit?: number;
 	};
+	private readonly channelDelivery: {
+		retries: number;
+		backoffMs: number;
+	};
 
 	constructor(
 		private readonly eventBus: EventBus,
@@ -124,6 +146,10 @@ export class NotificationService {
 			dedupeWindowMs: options.dedupeWindowMs ?? 0,
 			rateLimit: options.rateLimit,
 			retentionLimit: options.retentionLimit,
+		};
+		this.channelDelivery = options.channelDelivery ?? {
+			retries: 0,
+			backoffMs: 100,
 		};
 	}
 
@@ -149,14 +175,15 @@ export class NotificationService {
 			}
 			this.lastSentAt.set(key, now);
 		}
-		this.sent.push({
+		const record: NotificationRecord = {
 			id: this.nextId(),
 			topic: request.topic,
 			message: request.message,
 			severity,
 			acknowledged: false,
 			timestamp: new Date().toISOString(),
-		});
+		};
+		this.sent.push(record);
 		const retentionLimit = this.policy.retentionLimit;
 		if (retentionLimit && retentionLimit > 0 && this.sent.length > retentionLimit) {
 			const overflow = this.sent.length - retentionLimit;
@@ -166,6 +193,7 @@ export class NotificationService {
 			message: request.message,
 			severity,
 		});
+		this.deliverToChannels(record);
 		this.recordSent(request.topic);
 		return true;
 	}
@@ -325,6 +353,30 @@ export class NotificationService {
 		};
 	}
 
+	registerChannelAdapter(adapter: NotificationChannelAdapter): void {
+		this.channelAdapters.set(adapter.name, adapter);
+		if (!this.channelStats.has(adapter.name)) {
+			this.channelStats.set(adapter.name, {
+				success: 0,
+				failure: 0,
+				retried: 0,
+			});
+		}
+	}
+
+	getChannelStats(): Record<
+		string,
+		{
+			success: number;
+			failure: number;
+			retried: number;
+		}
+	> {
+		return Object.fromEntries(
+			[...this.channelStats.entries()].map(([name, stats]) => [name, { ...stats }]),
+		);
+	}
+
 	updatePolicy(patch: NotificationPolicyPatch): ReturnType<NotificationService["getPolicy"]> {
 		if (patch.dedupeWindowMs !== undefined && patch.dedupeWindowMs >= 0) {
 			this.policy.dedupeWindowMs = patch.dedupeWindowMs;
@@ -371,6 +423,44 @@ export class NotificationService {
 		filtered.push(now);
 		this.topicSendTimes.set(topic, filtered);
 		return true;
+	}
+
+	private deliverToChannels(record: NotificationRecord): void {
+		for (const [name, adapter] of this.channelAdapters.entries()) {
+			this.sendToChannel(name, adapter, record, 0);
+		}
+	}
+
+	private sendToChannel(
+		name: string,
+		adapter: NotificationChannelAdapter,
+		record: NotificationRecord,
+		attempt: number,
+	): void {
+		Promise.resolve(adapter.send(record))
+			.then(() => {
+				const stats = this.channelStats.get(name);
+				if (!stats) return;
+				stats.success += 1;
+				this.channelStats.set(name, stats);
+			})
+			.catch(() => {
+				if (attempt < this.channelDelivery.retries) {
+					const stats = this.channelStats.get(name);
+					if (stats) {
+						stats.retried += 1;
+						this.channelStats.set(name, stats);
+					}
+					setTimeout(() => {
+						this.sendToChannel(name, adapter, record, attempt + 1);
+					}, this.channelDelivery.backoffMs * (attempt + 1));
+					return;
+				}
+				const stats = this.channelStats.get(name);
+				if (!stats) return;
+				stats.failure += 1;
+				this.channelStats.set(name, stats);
+			});
 	}
 
 	private recordSent(topic: string): void {

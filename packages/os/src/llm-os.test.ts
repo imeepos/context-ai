@@ -28,6 +28,7 @@ describe("createDefaultLLMOS", () => {
 					"net:request",
 					"store:read",
 					"system:read",
+					"system:write",
 					"scheduler:write",
 					"scheduler:read",
 					"notification:read",
@@ -275,6 +276,69 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(["healthy", "degraded", "critical"]).toContain(alertsHealth.level);
+			const remediationPlan = await os.kernel.execute(
+				"system.alerts.auto-remediate.plan",
+				{ topic: "system.alert", windowMinutes: 10 },
+				context,
+			);
+			expect(Array.isArray(remediationPlan.actions)).toBe(true);
+			const remediationExec = await os.kernel.execute(
+				"system.alerts.auto-remediate.execute",
+				{ approved: true, dryRun: true, actions: remediationPlan.actions },
+				context,
+			);
+			expect(remediationExec.approved).toBe(true);
+			const slo = await os.kernel.execute("system.slo", {}, context);
+			expect(typeof slo.global.successRate).toBe("number");
+			const policyVersion = await os.kernel.execute("system.policy.version.create", { label: "test" }, context);
+			expect(typeof policyVersion.versionId).toBe("string");
+			const policyVersions = await os.kernel.execute("system.policy.version.list", {}, context);
+			expect(policyVersions.versions.length).toBeGreaterThan(0);
+			const policyBatch = await os.kernel.execute(
+				"system.policy.simulate.batch",
+				{ inputs: [{ command: "echo ok" }, { command: "rm -rf /" }] },
+				context,
+			);
+			expect(policyBatch.total).toBe(2);
+			const policyUpdate = await os.kernel.execute(
+				"system.policy.update",
+				{ patch: { networkRule: { denyDomains: ["forbidden.local"] } }, createVersionLabel: "deny" },
+				context,
+			);
+			expect(policyUpdate.policy.networkRule.denyDomains).toContain("forbidden.local");
+			const policyRollback = await os.kernel.execute(
+				"system.policy.version.rollback",
+				{ versionId: policyVersion.versionId },
+				context,
+			);
+			expect(typeof policyRollback.rolledBack).toBe("boolean");
+			const auditExport = await os.kernel.execute(
+				"system.audit.export",
+				{ limit: 10, compress: true, signingSecret: "s1" },
+				context,
+			);
+			expect(auditExport.compressed).toBe(true);
+			os.tenantQuotaGovernor.setQuota("tenant-a", { maxToolCalls: 100, maxTokens: 10000 });
+			const quotaNow = await os.kernel.execute(
+				"system.quota",
+				{ tenantId: "tenant-a" },
+				context,
+			);
+			expect(quotaNow.tenantId).toBe("tenant-a");
+			const quotaAdjusted = await os.kernel.execute(
+				"system.quota.adjust",
+				{ tenantId: "tenant-a", loadFactor: 0.9, priority: "high" },
+				context,
+			);
+			expect(quotaAdjusted.tenantId).toBe("tenant-a");
+			const chaos = await os.kernel.execute(
+				"system.chaos.run",
+				{ scenario: "policy_denied" },
+				context,
+			);
+			expect(chaos.passed).toBe(true);
+			const schedulerState = await os.kernel.execute("scheduler.state.export", {}, context);
+			expect(Array.isArray(schedulerState.tasks)).toBe(true);
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(

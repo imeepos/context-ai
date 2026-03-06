@@ -116,4 +116,30 @@ export class TenantQuotaGovernor implements ResourceGovernor {
 	getUsage(tenantId: string): TenantUsage {
 		return this.usage.get(tenantId) ?? { toolCalls: 0, tokens: 0 };
 	}
+
+	getQuota(tenantId: string): TenantQuota | undefined {
+		const quota = this.quotas.get(tenantId);
+		if (!quota) return undefined;
+		return { ...quota };
+	}
+
+	adjustQuota(
+		tenantId: string,
+		input: {
+			loadFactor: number;
+			priority: "low" | "normal" | "high";
+		},
+	): TenantQuota | undefined {
+		const current = this.quotas.get(tenantId);
+		if (!current) return undefined;
+		const normalizedLoad = Math.max(0, input.loadFactor);
+		const priorityMultiplier = input.priority === "high" ? 1.2 : input.priority === "low" ? 0.8 : 1;
+		const pressureMultiplier = normalizedLoad >= 0.8 ? 0.75 : normalizedLoad <= 0.4 ? 1.1 : 1;
+		const next: TenantQuota = {
+			maxToolCalls: Math.max(1, Math.floor(current.maxToolCalls * priorityMultiplier * pressureMultiplier)),
+			maxTokens: Math.max(100, Math.floor(current.maxTokens * priorityMultiplier * pressureMultiplier)),
+		};
+		this.quotas.set(tenantId, next);
+		return { ...next };
+	}
 }

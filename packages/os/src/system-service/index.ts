@@ -3,6 +3,10 @@ import type { NetService } from "../net-service/index.js";
 import type { NotificationService, NotificationSeverity } from "../notification-service/index.js";
 import type { SchedulerService } from "../scheduler-service/index.js";
 import type { OSService } from "../types/os.js";
+import type { PolicyInput } from "../types/os.js";
+import type { SecurityService } from "../security-service/index.js";
+import type { TenantQuotaGovernor } from "../kernel/resource-governor.js";
+import { gzipSync } from "node:zlib";
 
 export interface SystemHealthResponse {
 	services: string[];
@@ -1599,6 +1603,564 @@ export function createSystemAlertsHealthService(
 					dropRate,
 				},
 				breaches: breaches.breaches,
+			};
+		},
+	};
+}
+
+export interface SystemAlertsAutoRemediateAction {
+	id: string;
+	type: "reset_net_circuit" | "replay_scheduler_failure" | "mute_topic";
+	params: Record<string, unknown>;
+	reason: string;
+	rollback?: {
+		type: "notification.unmute";
+		params: Record<string, unknown>;
+	};
+}
+
+export interface SystemAlertsAutoRemediatePlanRequest {
+	topic?: string;
+	windowMinutes?: number;
+	overdueThresholdMs?: number;
+}
+
+export interface SystemAlertsAutoRemediatePlanResponse {
+	generatedAt: string;
+	actions: SystemAlertsAutoRemediateAction[];
+}
+
+export function createSystemAlertsAutoRemediatePlanService(
+	notificationService: NotificationService,
+	schedulerService?: SchedulerService,
+	netService?: NetService,
+): OSService<SystemAlertsAutoRemediatePlanRequest, SystemAlertsAutoRemediatePlanResponse> {
+	return {
+		name: "system.alerts.auto-remediate.plan",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const topic = req.topic ?? "system.alert";
+			const health = await createSystemAlertsHealthService(notificationService).execute(
+				{
+					topic,
+					windowMinutes: req.windowMinutes,
+				},
+				{
+					appId: "system",
+					sessionId: "system",
+					permissions: ["system:read"],
+					workingDirectory: process.cwd(),
+				},
+			);
+			const backlog = await createSystemAlertsBacklogService(notificationService).execute(
+				{
+					topic,
+					overdueThresholdMs: req.overdueThresholdMs,
+				},
+				{
+					appId: "system",
+					sessionId: "system",
+					permissions: ["system:read"],
+					workingDirectory: process.cwd(),
+				},
+			);
+			const actions: SystemAlertsAutoRemediateAction[] = [];
+			if (health.level !== "healthy" && netService) {
+				const circuits = netService.getCircuitSnapshot();
+				const openHosts = Object.entries(circuits)
+					.filter(([, state]) => state.state === "open")
+					.map(([host]) => host);
+				for (const host of openHosts) {
+					actions.push({
+						id: `reset-circuit-${host}`,
+						type: "reset_net_circuit",
+						params: { host },
+						reason: `Open circuit detected for ${host}`,
+					});
+				}
+			}
+			if (schedulerService) {
+				const failure = schedulerService.listFailures(1)[0];
+				if (failure) {
+					actions.push({
+						id: `replay-${failure.id}`,
+						type: "replay_scheduler_failure",
+						params: { id: failure.id },
+						reason: `Retry latest failed scheduler task ${failure.id}`,
+					});
+				}
+			}
+			if (backlog.overdueCount > 0) {
+				const muteMs = Math.min(300000, backlog.oldestUnackedAgeMs);
+				actions.push({
+					id: `mute-${topic}`,
+					type: "mute_topic",
+					params: { topic, durationMs: muteMs },
+					reason: `Backlog overdue count=${backlog.overdueCount}, temporarily mute noisy topic`,
+					rollback: {
+						type: "notification.unmute",
+						params: { topic },
+					},
+				});
+			}
+			return {
+				generatedAt: new Date().toISOString(),
+				actions,
+			};
+		},
+	};
+}
+
+export interface SystemAlertsAutoRemediateExecuteRequest {
+	approved?: boolean;
+	dryRun?: boolean;
+	actions: SystemAlertsAutoRemediateAction[];
+}
+
+export interface SystemAlertsAutoRemediateExecuteResponse {
+	approved: boolean;
+	executed: number;
+	results: Array<{
+		id: string;
+		ok: boolean;
+		message: string;
+		rollback?: SystemAlertsAutoRemediateAction["rollback"];
+	}>;
+}
+
+export function createSystemAlertsAutoRemediateExecuteService(
+	notificationService: NotificationService,
+	schedulerService: SchedulerService,
+	netService: NetService,
+): OSService<SystemAlertsAutoRemediateExecuteRequest, SystemAlertsAutoRemediateExecuteResponse> {
+	return {
+		name: "system.alerts.auto-remediate.execute",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			if (!req.approved) {
+				return {
+					approved: false,
+					executed: 0,
+					results: req.actions.map((action) => ({
+						id: action.id,
+						ok: false,
+						message: "approval_required",
+					})),
+				};
+			}
+			const results: SystemAlertsAutoRemediateExecuteResponse["results"] = [];
+			let executed = 0;
+			for (const action of req.actions) {
+				if (req.dryRun) {
+					results.push({
+						id: action.id,
+						ok: true,
+						message: "dry_run",
+						rollback: action.rollback,
+					});
+					executed += 1;
+					continue;
+				}
+				if (action.type === "reset_net_circuit") {
+					const host = typeof action.params.host === "string" ? action.params.host : undefined;
+					const cleared = netService.resetCircuits(host);
+					results.push({
+						id: action.id,
+						ok: true,
+						message: `cleared=${cleared}`,
+						rollback: action.rollback,
+					});
+					executed += 1;
+					continue;
+				}
+				if (action.type === "replay_scheduler_failure") {
+					const id = String(action.params.id ?? "");
+					const replayed = schedulerService.replayFailure(id);
+					results.push({
+						id: action.id,
+						ok: replayed,
+						message: replayed ? "replayed" : "replay_failed",
+						rollback: action.rollback,
+					});
+					executed += replayed ? 1 : 0;
+					continue;
+				}
+				if (action.type === "mute_topic") {
+					const topic = String(action.params.topic ?? "");
+					const durationMs = Number(action.params.durationMs ?? 0);
+					notificationService.muteTopic({
+						topic,
+						durationMs: durationMs > 0 ? durationMs : 60000,
+					});
+					results.push({
+						id: action.id,
+						ok: true,
+						message: "muted",
+						rollback: action.rollback,
+					});
+					executed += 1;
+					continue;
+				}
+				results.push({
+					id: action.id,
+					ok: false,
+					message: "unknown_action",
+					rollback: action.rollback,
+				});
+			}
+			return {
+				approved: true,
+				executed,
+				results,
+			};
+		},
+	};
+}
+
+export interface SystemPolicyUpdateRequest {
+	patch: Partial<ReturnType<LLMOSKernel["policy"]["getSnapshot"]>>;
+	createVersionLabel?: string;
+}
+
+export function createSystemPolicyUpdateService(
+	kernel: LLMOSKernel,
+): OSService<SystemPolicyUpdateRequest, { policy: ReturnType<LLMOSKernel["policy"]["getSnapshot"]> }> {
+	return {
+		name: "system.policy.update",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			const policy = kernel.policy.updateRules(req.patch);
+			if (req.createVersionLabel !== undefined) {
+				kernel.policy.createVersion(req.createVersionLabel);
+			}
+			return { policy };
+		},
+	};
+}
+
+export function createSystemPolicyVersionCreateService(
+	kernel: LLMOSKernel,
+): OSService<{ label?: string }, { versionId: string; createdAt: string; label?: string }> {
+	return {
+		name: "system.policy.version.create",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			const version = kernel.policy.createVersion(req.label);
+			return {
+				versionId: version.versionId,
+				createdAt: version.createdAt,
+				label: version.label,
+			};
+		},
+	};
+}
+
+export function createSystemPolicyVersionListService(
+	kernel: LLMOSKernel,
+): OSService<Record<string, never>, { versions: ReturnType<LLMOSKernel["policy"]["listVersions"]> }> {
+	return {
+		name: "system.policy.version.list",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			versions: kernel.policy.listVersions(),
+		}),
+	};
+}
+
+export function createSystemPolicyVersionRollbackService(
+	kernel: LLMOSKernel,
+): OSService<{ versionId: string }, { rolledBack: boolean; policy: ReturnType<LLMOSKernel["policy"]["getSnapshot"]> }> {
+	return {
+		name: "system.policy.version.rollback",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => ({
+			rolledBack: kernel.policy.rollbackVersion(req.versionId),
+			policy: kernel.policy.getSnapshot(),
+		}),
+	};
+}
+
+export interface SystemPolicySimulateBatchRequest {
+	inputs: PolicyInput[];
+}
+
+export interface SystemPolicySimulateBatchResponse {
+	total: number;
+	denied: number;
+	decisions: Array<{
+		allowed: boolean;
+		reason?: string;
+	}>;
+	reasons: Record<string, number>;
+}
+
+export function createSystemPolicySimulateBatchService(
+	kernel: LLMOSKernel,
+): OSService<SystemPolicySimulateBatchRequest, SystemPolicySimulateBatchResponse> {
+	return {
+		name: "system.policy.simulate.batch",
+		requiredPermissions: ["system:read"],
+		execute: async (req, ctx) => {
+			const decisions = req.inputs.map((input) => kernel.policy.evaluate(input, ctx));
+			const reasons: Record<string, number> = {};
+			for (const decision of decisions) {
+				if (!decision.allowed) {
+					const key = decision.reason ?? "denied";
+					reasons[key] = (reasons[key] ?? 0) + 1;
+				}
+			}
+			const denied = decisions.filter((item) => !item.allowed).length;
+			return {
+				total: decisions.length,
+				denied,
+				decisions,
+				reasons,
+			};
+		},
+	};
+}
+
+export interface SystemSLORequest {
+	services?: string[];
+}
+
+export interface SystemSLOResponse {
+	global: {
+		total: number;
+		success: number;
+		failure: number;
+		successRate: number;
+		errorRate: number;
+		p95DurationMs: number;
+	};
+	services: ReturnType<LLMOSKernel["metrics"]["allSnapshots"]>;
+	alerting: {
+		ackedCount: number;
+		p95AckLatencyMs: number;
+	};
+}
+
+export function createSystemSLOService(
+	kernel: LLMOSKernel,
+	notificationService: NotificationService,
+): OSService<SystemSLORequest, SystemSLOResponse> {
+	return {
+		name: "system.slo",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const serviceMetrics = kernel.metrics
+				.allSnapshots()
+				.filter((metric) => !req.services || req.services.includes(metric.service));
+			const total = serviceMetrics.reduce((sum, item) => sum + item.total, 0);
+			const success = serviceMetrics.reduce((sum, item) => sum + item.success, 0);
+			const failure = serviceMetrics.reduce((sum, item) => sum + item.failure, 0);
+			const p95DurationMs =
+				serviceMetrics.length === 0 ? 0 : Math.max(...serviceMetrics.map((item) => item.p95DurationMs));
+			const alertSLO = await createSystemAlertsSLOService(notificationService).execute(
+				{},
+				{
+					appId: "system",
+					sessionId: "system",
+					permissions: ["system:read"],
+					workingDirectory: process.cwd(),
+				},
+			);
+			return {
+				global: {
+					total,
+					success,
+					failure,
+					successRate: total === 0 ? 1 : success / total,
+					errorRate: total === 0 ? 0 : failure / total,
+					p95DurationMs,
+				},
+				services: serviceMetrics,
+				alerting: {
+					ackedCount: alertSLO.ackedCount,
+					p95AckLatencyMs: alertSLO.p95AckLatencyMs,
+				},
+			};
+		},
+	};
+}
+
+export interface SystemAuditExportRequest {
+	since?: string;
+	until?: string;
+	cursor?: number;
+	limit?: number;
+	format?: "jsonl";
+	compress?: boolean;
+	signingSecret?: string;
+}
+
+export interface SystemAuditExportResponse {
+	content: string;
+	contentType: string;
+	compressed: boolean;
+	signature: string;
+	nextCursor: number;
+	exported: number;
+}
+
+export function createSystemAuditExportService(
+	kernel: LLMOSKernel,
+	securityService: SecurityService,
+): OSService<SystemAuditExportRequest, SystemAuditExportResponse> {
+	return {
+		name: "system.audit.export",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			let records = kernel.audit.list();
+			if (req.since) {
+				const since = Date.parse(req.since);
+				if (!Number.isNaN(since)) {
+					records = records.filter((item) => Date.parse(item.timestamp) >= since);
+				}
+			}
+			if (req.until) {
+				const until = Date.parse(req.until);
+				if (!Number.isNaN(until)) {
+					records = records.filter((item) => Date.parse(item.timestamp) <= until);
+				}
+			}
+			const cursor = req.cursor && req.cursor > 0 ? req.cursor : 0;
+			const limit = req.limit && req.limit > 0 ? req.limit : 100;
+			const sliced = records.slice(cursor, cursor + limit);
+			const jsonl = sliced.map((item) => JSON.stringify(item)).join("\n");
+			if (req.compress) {
+				const compressedBuffer = gzipSync(Buffer.from(jsonl, "utf8"));
+				const content = compressedBuffer.toString("base64");
+				return {
+					content,
+					contentType: "application/gzip+base64",
+					compressed: true,
+					signature: securityService.sign(content, req.signingSecret ?? "audit-export-secret"),
+					nextCursor: cursor + sliced.length,
+					exported: sliced.length,
+				};
+			}
+			return {
+				content: jsonl,
+				contentType: "application/x-ndjson",
+				compressed: false,
+				signature: securityService.sign(jsonl, req.signingSecret ?? "audit-export-secret"),
+				nextCursor: cursor + sliced.length,
+				exported: sliced.length,
+			};
+		},
+	};
+}
+
+export function createSystemQuotaService(
+	tenantGovernor: TenantQuotaGovernor,
+): OSService<{ tenantId: string }, { tenantId: string; quota?: { maxToolCalls: number; maxTokens: number }; usage: { toolCalls: number; tokens: number } }> {
+	return {
+		name: "system.quota",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => ({
+			tenantId: req.tenantId,
+			quota: tenantGovernor.getQuota(req.tenantId),
+			usage: tenantGovernor.getUsage(req.tenantId),
+		}),
+	};
+}
+
+export function createSystemQuotaAdjustService(
+	tenantGovernor: TenantQuotaGovernor,
+): OSService<
+	{
+		tenantId: string;
+		loadFactor: number;
+		priority: "low" | "normal" | "high";
+	},
+	{
+		tenantId: string;
+		quota?: { maxToolCalls: number; maxTokens: number };
+	}
+> {
+	return {
+		name: "system.quota.adjust",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => ({
+			tenantId: req.tenantId,
+			quota: tenantGovernor.adjustQuota(req.tenantId, {
+				loadFactor: req.loadFactor,
+				priority: req.priority,
+			}),
+		}),
+	};
+}
+
+export interface SystemChaosRunRequest {
+	scenario: "policy_denied" | "scheduler_failure" | "alert_storm";
+}
+
+export interface SystemChaosRunResponse {
+	scenario: SystemChaosRunRequest["scenario"];
+	passed: boolean;
+	details: Record<string, unknown>;
+}
+
+export function createSystemChaosRunService(
+	kernel: LLMOSKernel,
+	notificationService: NotificationService,
+	schedulerService: SchedulerService,
+): OSService<SystemChaosRunRequest, SystemChaosRunResponse> {
+	return {
+		name: "system.chaos.run",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			if (req.scenario === "policy_denied") {
+				const decision = kernel.policy.evaluate(
+					{
+						command: "rm -rf /",
+					},
+					{
+						appId: "chaos",
+						sessionId: "chaos",
+						permissions: [],
+						workingDirectory: process.cwd(),
+					},
+				);
+				return {
+					scenario: req.scenario,
+					passed: !decision.allowed,
+					details: {
+						decision,
+					},
+				};
+			}
+			if (req.scenario === "scheduler_failure") {
+				const id = `chaos-${Date.now()}`;
+				schedulerService.scheduleRetryable(
+					id,
+					async () => {
+						throw new Error("chaos-failure");
+					},
+					{ maxRetries: 0, backoffMs: 1 },
+				);
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				const failures = schedulerService.listFailures(5).filter((item) => item.id === id);
+				return {
+					scenario: req.scenario,
+					passed: failures.length > 0,
+					details: {
+						failures,
+					},
+				};
+			}
+			const before = notificationService.getStats();
+			notificationService.send({ topic: "system.alert", message: "chaos-a", severity: "critical" });
+			notificationService.send({ topic: "system.alert", message: "chaos-b", severity: "critical" });
+			const after = notificationService.getStats();
+			return {
+				scenario: req.scenario,
+				passed: after.sent >= before.sent,
+				details: {
+					before,
+					after,
+				},
 			};
 		},
 	};

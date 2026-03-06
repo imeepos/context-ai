@@ -50,6 +50,8 @@ import {
 	createSchedulerListService,
 	createSchedulerScheduleIntervalService,
 	createSchedulerScheduleOnceService,
+	createSchedulerStateExportService,
+	createSchedulerStateImportService,
 } from "./scheduler-service/index.js";
 import { SecurityService, createSecurityRedactService } from "./security-service/index.js";
 import {
@@ -83,6 +85,8 @@ import {
 	createSystemAlertsBacklogService,
 	createSystemAlertsBreachesService,
 	createSystemAlertsHealthService,
+	createSystemAlertsAutoRemediatePlanService,
+	createSystemAlertsAutoRemediateExecuteService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -96,6 +100,16 @@ import {
 	createSystemPolicyService,
 	createSystemSchedulerFailuresService,
 	createSystemSnapshotService,
+	createSystemPolicyUpdateService,
+	createSystemPolicyVersionCreateService,
+	createSystemPolicyVersionListService,
+	createSystemPolicyVersionRollbackService,
+	createSystemPolicySimulateBatchService,
+	createSystemSLOService,
+	createSystemAuditExportService,
+	createSystemQuotaService,
+	createSystemQuotaAdjustService,
+	createSystemChaosRunService,
 	createSystemTopologyService,
 } from "./system-service/index.js";
 import type { OSService, PathPolicyRule } from "./types/os.js";
@@ -242,6 +256,8 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("scheduler.list", () => createSchedulerListService(schedulerService));
 	registerWhenEnabled("scheduler.failures.clear", () => createSchedulerFailuresClearService(schedulerService));
 	registerWhenEnabled("scheduler.failures.replay", () => createSchedulerFailuresReplayService(schedulerService));
+	registerWhenEnabled("scheduler.state.export", () => createSchedulerStateExportService(schedulerService));
+	registerWhenEnabled("scheduler.state.import", () => createSchedulerStateImportService(schedulerService));
 	registerWhenEnabled("notification.send", () => createNotificationSendService(notificationService));
 	registerWhenEnabled("notification.ack", () => createNotificationAckService(notificationService));
 	registerWhenEnabled("notification.ackAll", () => createNotificationAckAllService(notificationService));
@@ -268,6 +284,11 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.capabilities.list", () => createSystemCapabilitiesListService(kernel));
 	registerWhenEnabled("system.policy", () => createSystemPolicyService(kernel));
 	registerWhenEnabled("system.policy.evaluate", () => createSystemPolicyEvaluateService(kernel));
+	registerWhenEnabled("system.policy.update", () => createSystemPolicyUpdateService(kernel));
+	registerWhenEnabled("system.policy.version.create", () => createSystemPolicyVersionCreateService(kernel));
+	registerWhenEnabled("system.policy.version.list", () => createSystemPolicyVersionListService(kernel));
+	registerWhenEnabled("system.policy.version.rollback", () => createSystemPolicyVersionRollbackService(kernel));
+	registerWhenEnabled("system.policy.simulate.batch", () => createSystemPolicySimulateBatchService(kernel));
 	registerWhenEnabled("system.net.circuit", () => createSystemNetCircuitService(netService));
 	registerWhenEnabled("system.net.circuit.reset", () => createSystemNetCircuitResetService(netService));
 	registerWhenEnabled("system.scheduler.failures", () => createSystemSchedulerFailuresService(schedulerService));
@@ -296,6 +317,17 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	registerWhenEnabled("system.alerts.backlog", () => createSystemAlertsBacklogService(notificationService));
 	registerWhenEnabled("system.alerts.breaches", () => createSystemAlertsBreachesService(notificationService));
 	registerWhenEnabled("system.alerts.health", () => createSystemAlertsHealthService(notificationService));
+	registerWhenEnabled("system.alerts.auto-remediate.plan", () =>
+		createSystemAlertsAutoRemediatePlanService(notificationService, schedulerService, netService),
+	);
+	registerWhenEnabled("system.alerts.auto-remediate.execute", () =>
+		createSystemAlertsAutoRemediateExecuteService(notificationService, schedulerService, netService),
+	);
+	registerWhenEnabled("system.slo", () => createSystemSLOService(kernel, notificationService));
+	registerWhenEnabled("system.audit.export", () => createSystemAuditExportService(kernel, securityService));
+	registerWhenEnabled("system.quota", () => createSystemQuotaService(tenantQuotaGovernor));
+	registerWhenEnabled("system.quota.adjust", () => createSystemQuotaAdjustService(tenantQuotaGovernor));
+	registerWhenEnabled("system.chaos.run", () => createSystemChaosRunService(kernel, notificationService, schedulerService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

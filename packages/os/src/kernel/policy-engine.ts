@@ -7,6 +7,13 @@ interface PolicyEngineOptions {
 	networkRule?: NetworkPolicyRule;
 }
 
+export interface PolicyVersionRecord {
+	versionId: string;
+	createdAt: string;
+	label?: string;
+	snapshot: PolicySnapshot;
+}
+
 export interface PolicySnapshot {
 	pathRule: PathPolicyRule;
 	commandRule: {
@@ -58,10 +65,12 @@ function isNetworkAllowed(url: string, rule: NetworkPolicyRule): boolean {
 }
 
 export class PolicyEngine {
-	private readonly pathRule: PathPolicyRule;
-	private readonly commandRule: CommandPolicyRule;
-	private readonly networkRule: NetworkPolicyRule;
+	private pathRule: PathPolicyRule;
+	private commandRule: CommandPolicyRule;
+	private networkRule: NetworkPolicyRule;
 	private readonly networkRateUsage = new Map<string, number[]>();
+	private readonly versions: PolicyVersionRecord[] = [];
+	private versionSeq = 0;
 
 	constructor(options: PolicyEngineOptions = {}) {
 		this.pathRule = options.pathRule ?? { allow: [], deny: [] };
@@ -69,6 +78,7 @@ export class PolicyEngine {
 			denyPatterns: [/rm\s+-rf\s+\/?/i, /shutdown/i, /reboot/i, /mkfs/i],
 		};
 		this.networkRule = options.networkRule ?? { denyDomains: [] };
+		this.createVersion("bootstrap");
 	}
 
 	getSnapshot(): PolicySnapshot {
@@ -94,6 +104,97 @@ export class PolicyEngine {
 					: undefined,
 			},
 		};
+	}
+
+	updateRules(patch: Partial<PolicySnapshot>): PolicySnapshot {
+		if (patch.pathRule) {
+			this.pathRule = {
+				allow: [...(patch.pathRule.allow ?? this.pathRule.allow)],
+				deny: [...(patch.pathRule.deny ?? this.pathRule.deny)],
+			};
+		}
+		if (patch.commandRule) {
+			const allowPatterns =
+				patch.commandRule.allowPatterns !== undefined
+					? patch.commandRule.allowPatterns.map((pattern) => new RegExp(pattern))
+					: this.commandRule.allowPatterns;
+			const denyPatterns =
+				patch.commandRule.denyPatterns !== undefined
+					? patch.commandRule.denyPatterns.map((pattern) => new RegExp(pattern))
+					: this.commandRule.denyPatterns;
+			this.commandRule = {
+				allowPatterns,
+				denyPatterns,
+			};
+		}
+		if (patch.networkRule) {
+			this.networkRule = {
+				allowDomains: patch.networkRule.allowDomains ?? this.networkRule.allowDomains,
+				denyDomains: patch.networkRule.denyDomains ?? this.networkRule.denyDomains,
+				allowMethods: patch.networkRule.allowMethods ?? this.networkRule.allowMethods,
+				denyMethods: patch.networkRule.denyMethods ?? this.networkRule.denyMethods,
+				rateLimit: patch.networkRule.rateLimit ?? this.networkRule.rateLimit,
+			};
+		}
+		return this.getSnapshot();
+	}
+
+	createVersion(label?: string): PolicyVersionRecord {
+		this.versionSeq += 1;
+		const version: PolicyVersionRecord = {
+			versionId: `pv-${this.versionSeq}`,
+			createdAt: new Date().toISOString(),
+			label,
+			snapshot: this.getSnapshot(),
+		};
+		this.versions.push(version);
+		return version;
+	}
+
+	listVersions(): PolicyVersionRecord[] {
+		return this.versions.map((version) => ({
+			...version,
+			snapshot: {
+				pathRule: {
+					allow: [...version.snapshot.pathRule.allow],
+					deny: [...version.snapshot.pathRule.deny],
+				},
+				commandRule: {
+					allowPatterns: version.snapshot.commandRule.allowPatterns
+						? [...version.snapshot.commandRule.allowPatterns]
+						: undefined,
+					denyPatterns: [...version.snapshot.commandRule.denyPatterns],
+				},
+				networkRule: {
+					allowDomains: version.snapshot.networkRule.allowDomains
+						? [...version.snapshot.networkRule.allowDomains]
+						: undefined,
+					denyDomains: version.snapshot.networkRule.denyDomains
+						? [...version.snapshot.networkRule.denyDomains]
+						: undefined,
+					allowMethods: version.snapshot.networkRule.allowMethods
+						? [...version.snapshot.networkRule.allowMethods]
+						: undefined,
+					denyMethods: version.snapshot.networkRule.denyMethods
+						? [...version.snapshot.networkRule.denyMethods]
+						: undefined,
+					rateLimit: version.snapshot.networkRule.rateLimit
+						? {
+								limit: version.snapshot.networkRule.rateLimit.limit,
+								windowMs: version.snapshot.networkRule.rateLimit.windowMs,
+							}
+						: undefined,
+				},
+			},
+		}));
+	}
+
+	rollbackVersion(versionId: string): boolean {
+		const version = this.versions.find((item) => item.versionId === versionId);
+		if (!version) return false;
+		this.updateRules(version.snapshot);
+		this.createVersion(`rollback:${versionId}`);
+		return true;
 	}
 
 	evaluate(input: PolicyInput, ctx: OSContext): PolicyDecision {

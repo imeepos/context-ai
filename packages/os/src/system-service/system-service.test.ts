@@ -6,6 +6,7 @@ import { NotificationService } from "../notification-service/index.js";
 import { PolicyEngine } from "../kernel/policy-engine.js";
 import { SchedulerService } from "../scheduler-service/index.js";
 import { SecurityService } from "../security-service/index.js";
+import { TenantQuotaGovernor } from "../kernel/resource-governor.js";
 import { vi } from "vitest";
 import {
 	createSystemAuditService,
@@ -35,6 +36,18 @@ import {
 	createSystemAlertsBacklogService,
 	createSystemAlertsBreachesService,
 	createSystemAlertsHealthService,
+	createSystemAlertsAutoRemediatePlanService,
+	createSystemAlertsAutoRemediateExecuteService,
+	createSystemPolicyUpdateService,
+	createSystemPolicyVersionCreateService,
+	createSystemPolicyVersionListService,
+	createSystemPolicyVersionRollbackService,
+	createSystemPolicySimulateBatchService,
+	createSystemSLOService,
+	createSystemAuditExportService,
+	createSystemQuotaService,
+	createSystemQuotaAdjustService,
+	createSystemChaosRunService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -938,6 +951,186 @@ describe("SystemService", () => {
 		expect(response.indicators.criticalCount).toBe(1);
 		expect(response.indicators.unackedCount).toBe(1);
 		expect(response.indicators.dropRate).toBeGreaterThan(0);
+		vi.useRealTimers();
+	});
+
+	it("creates auto-remediation plan and executes in dry-run/approved mode", async () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "p1", severity: "critical" });
+		const net = new NetService(new PolicyEngine(), new SecurityService(), undefined, {
+			circuitBreaker: { failureThreshold: 1, cooldownMs: 1000 },
+		});
+		vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("net-fail"));
+		await expect(
+			net.request(
+				{ url: "https://example.com" },
+				{
+					appId: "app.demo",
+					sessionId: "s33",
+					permissions: ["net:request", "system:read", "system:write"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toThrow();
+		const scheduler = new SchedulerService();
+		scheduler.scheduleRetryable(
+			"remediate-fail",
+			async () => {
+				throw new Error("x");
+			},
+			{ maxRetries: 0, backoffMs: 1 },
+		);
+		await vi.advanceTimersByTimeAsync(5);
+
+		const planService = createSystemAlertsAutoRemediatePlanService(notification, scheduler, net);
+		const plan = await planService.execute(
+			{ topic: "system.alert" },
+			{
+				appId: "app.demo",
+				sessionId: "s33",
+				permissions: ["system:read", "system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(plan.actions.length).toBeGreaterThan(0);
+		const executeService = createSystemAlertsAutoRemediateExecuteService(notification, scheduler, net);
+		const denied = await executeService.execute(
+			{ approved: false, actions: plan.actions },
+			{
+				appId: "app.demo",
+				sessionId: "s33",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(denied.approved).toBe(false);
+		const executed = await executeService.execute(
+			{ approved: true, dryRun: true, actions: plan.actions },
+			{
+				appId: "app.demo",
+				sessionId: "s33",
+				permissions: ["system:write"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(executed.executed).toBe(plan.actions.length);
+		vi.useRealTimers();
+	});
+
+	it("supports policy versioning and rollback", async () => {
+		const kernel = new LLMOSKernel();
+		const createVersion = createSystemPolicyVersionCreateService(kernel);
+		const listVersion = createSystemPolicyVersionListService(kernel);
+		const updatePolicy = createSystemPolicyUpdateService(kernel);
+		const rollback = createSystemPolicyVersionRollbackService(kernel);
+		const base = await createVersion.execute(
+			{ label: "base" },
+			{ appId: "app.demo", sessionId: "s34", permissions: ["system:write", "system:read"], workingDirectory: process.cwd() },
+		);
+		await updatePolicy.execute(
+			{ patch: { networkRule: { denyDomains: ["deny.example"] } }, createVersionLabel: "deny" },
+			{ appId: "app.demo", sessionId: "s34", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const listed = await listVersion.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s34", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(listed.versions.length).toBeGreaterThan(1);
+		const rolled = await rollback.execute(
+			{ versionId: base.versionId },
+			{ appId: "app.demo", sessionId: "s34", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(rolled.rolledBack).toBe(true);
+	});
+
+	it("simulates policy in batch mode", async () => {
+		const kernel = new LLMOSKernel();
+		const service = createSystemPolicySimulateBatchService(kernel);
+		const response = await service.execute(
+			{ inputs: [{ command: "echo ok" }, { command: "rm -rf /" }] },
+			{ appId: "app.demo", sessionId: "s35", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(response.total).toBe(2);
+		expect(response.denied).toBe(1);
+	});
+
+	it("returns global slo and alerting metrics", async () => {
+		const kernel = new LLMOSKernel();
+		kernel.registerService({
+			name: "slo.demo",
+			requiredPermissions: [],
+			execute: async () => ({ ok: true }),
+		});
+		await kernel.execute("slo.demo", {}, { appId: "app.demo", sessionId: "s36", permissions: [], workingDirectory: process.cwd() });
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "slo1", severity: "error" });
+		const service = createSystemSLOService(kernel, notification);
+		const response = await service.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s36", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(response.global.total).toBeGreaterThan(0);
+		expect(typeof response.alerting.p95AckLatencyMs).toBe("number");
+	});
+
+	it("exports audit incrementally with signature", async () => {
+		const kernel = new LLMOSKernel();
+		kernel.registerService({ name: "audit.demo", requiredPermissions: [], execute: async () => ({ ok: true }) });
+		await kernel.execute("audit.demo", {}, { appId: "app.demo", sessionId: "s37", permissions: [], workingDirectory: process.cwd() });
+		const security = new SecurityService();
+		const service = createSystemAuditExportService(kernel, security);
+		const response = await service.execute(
+			{ limit: 10, compress: true, signingSecret: "k1" },
+			{ appId: "app.demo", sessionId: "s37", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(response.exported).toBeGreaterThan(0);
+		expect(response.compressed).toBe(true);
+		expect(security.verify(response.content, "k1", response.signature)).toBe(true);
+	});
+
+	it("adjusts dynamic tenant quota", async () => {
+		const governor = new TenantQuotaGovernor();
+		governor.setQuota("tenant-1", { maxToolCalls: 100, maxTokens: 1000 });
+		const quotaService = createSystemQuotaService(governor);
+		const adjustService = createSystemQuotaAdjustService(governor);
+		const before = await quotaService.execute(
+			{ tenantId: "tenant-1" },
+			{ appId: "app.demo", sessionId: "s38", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(before.quota?.maxToolCalls).toBe(100);
+		await adjustService.execute(
+			{ tenantId: "tenant-1", loadFactor: 0.9, priority: "high" },
+			{ appId: "app.demo", sessionId: "s38", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const after = await quotaService.execute(
+			{ tenantId: "tenant-1" },
+			{ appId: "app.demo", sessionId: "s38", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(after.quota?.maxToolCalls).toBeLessThan(100);
+	});
+
+	it("runs chaos drills", async () => {
+		vi.useFakeTimers();
+		const kernel = new LLMOSKernel();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		const scheduler = new SchedulerService();
+		const service = createSystemChaosRunService(kernel, notification, scheduler);
+		const policyDrill = await service.execute(
+			{ scenario: "policy_denied" },
+			{ appId: "app.demo", sessionId: "s39", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		expect(policyDrill.passed).toBe(true);
+		const schedulerDrillPromise = service.execute(
+			{ scenario: "scheduler_failure" },
+			{ appId: "app.demo", sessionId: "s39", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		await vi.advanceTimersByTimeAsync(20);
+		const schedulerDrill = await schedulerDrillPromise;
+		expect(schedulerDrill.passed).toBe(true);
 		vi.useRealTimers();
 	});
 });

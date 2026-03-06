@@ -326,6 +326,27 @@ describe("SchedulerService", () => {
 		expect(runs).toBe(2);
 		vi.useRealTimers();
 	});
+
+	it("exports and restores persisted scheduler state", async () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const scheduler = new SchedulerService(bus);
+		let fired = 0;
+		bus.subscribe("demo.restore", () => {
+			fired += 1;
+		});
+		scheduler.scheduleEventOnce("persist-once", 100, "demo.restore", { ok: true });
+		const snapshot = scheduler.exportState();
+		expect(snapshot.tasks).toHaveLength(1);
+		scheduler.cancel("persist-once");
+
+		const restored = new SchedulerService(bus);
+		const restoredResult = restored.restoreState(snapshot);
+		expect(restoredResult.restoredTasks).toBe(1);
+		await vi.advanceTimersByTimeAsync(120);
+		expect(fired).toBe(1);
+		vi.useRealTimers();
+	});
 });
 
 describe("NotificationService", () => {
@@ -523,5 +544,32 @@ describe("NotificationService", () => {
 		expect(policy.dedupeWindowMs).toBe(1000);
 		expect(policy.rateLimit?.limit).toBe(1);
 		expect(policy.retentionLimit).toBe(2);
+	});
+
+	it("retries notification channel adapter delivery", async () => {
+		vi.useFakeTimers();
+		const bus = new EventBus();
+		const notification = new NotificationService(bus, {
+			channelDelivery: {
+				retries: 2,
+				backoffMs: 10,
+			},
+		});
+		const adapter = {
+			name: "webhook",
+			send: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("x1"))
+				.mockRejectedValueOnce(new Error("x2"))
+				.mockResolvedValue(undefined),
+		};
+		notification.registerChannelAdapter(adapter);
+		notification.send({ topic: "system.alert", message: "channel-test", severity: "error" });
+		await vi.advanceTimersByTimeAsync(50);
+		const stats = notification.getChannelStats();
+		expect(adapter.send).toHaveBeenCalledTimes(3);
+		expect(stats.webhook?.retried).toBe(2);
+		expect(stats.webhook?.success).toBe(1);
+		vi.useRealTimers();
 	});
 });

@@ -25,10 +25,22 @@ interface RetryableTaskDefinition {
 	};
 }
 
+export interface SchedulerPersistedTask {
+	id: string;
+	type: "once" | "interval";
+	topic: string;
+	payload?: unknown;
+	runAt?: string;
+	intervalMs?: number;
+	maxRuns?: number;
+	runs?: number;
+}
+
 export class SchedulerService {
 	private readonly tasks = new Map<string, TaskHandle>();
 	private readonly failures: SchedulerFailureRecord[] = [];
 	private readonly retryableDefinitions = new Map<string, RetryableTaskDefinition>();
+	private readonly persistedTasks = new Map<string, SchedulerPersistedTask>();
 	constructor(private readonly eventBus?: EventBus) {}
 
 	publishEvent(topic: string, payload?: unknown): void {
@@ -66,11 +78,60 @@ export class SchedulerService {
 		return { id, name: "timeout" };
 	}
 
+	scheduleEventOnce(id: string, delayMs: number, topic: string, payload?: unknown): ScheduledTask {
+		const runAt = Date.now() + delayMs;
+		this.persistedTasks.set(id, {
+			id,
+			type: "once",
+			topic,
+			payload,
+			runAt: new Date(runAt).toISOString(),
+		});
+		return this.scheduleOnce(id, delayMs, () => {
+			this.publishEvent(topic, payload);
+			this.persistedTasks.delete(id);
+		});
+	}
+
+	scheduleEventInterval(
+		id: string,
+		intervalMs: number,
+		topic: string,
+		payload?: unknown,
+		options?: { maxRuns?: number },
+	): ScheduledTask {
+		let runs = 0;
+		this.persistedTasks.set(id, {
+			id,
+			type: "interval",
+			topic,
+			payload,
+			intervalMs,
+			maxRuns: options?.maxRuns,
+			runs: 0,
+		});
+		return this.scheduleInterval(
+			id,
+			intervalMs,
+			() => {
+				runs += 1;
+				this.publishEvent(topic, payload);
+				const entry = this.persistedTasks.get(id);
+				if (entry) {
+					entry.runs = runs;
+					this.persistedTasks.set(id, entry);
+				}
+			},
+			options,
+		);
+	}
+
 	cancel(id: string): boolean {
 		const task = this.tasks.get(id);
 		if (!task) return false;
 		task.stop();
 		this.tasks.delete(id);
+		this.persistedTasks.delete(id);
 		return true;
 	}
 
@@ -171,6 +232,48 @@ export class SchedulerService {
 		});
 		return { id, name: "retryable" };
 	}
+
+	exportState(): {
+		tasks: SchedulerPersistedTask[];
+		failures: SchedulerFailureRecord[];
+	} {
+		return {
+			tasks: [...this.persistedTasks.values()].map((task) => ({ ...task })),
+			failures: this.listFailures(),
+		};
+	}
+
+	restoreState(snapshot: { tasks?: SchedulerPersistedTask[]; failures?: SchedulerFailureRecord[] }): {
+		restoredTasks: number;
+		restoredFailures: number;
+	} {
+		let restoredTasks = 0;
+		if (snapshot.tasks) {
+			for (const task of snapshot.tasks) {
+				if (this.tasks.has(task.id)) continue;
+				if (task.type === "once") {
+					const runAtMs = task.runAt ? Date.parse(task.runAt) : Date.now();
+					const delayMs = Math.max(0, runAtMs - Date.now());
+					this.scheduleEventOnce(task.id, delayMs, task.topic, task.payload);
+					restoredTasks += 1;
+					continue;
+				}
+				if (task.type === "interval" && task.intervalMs && task.intervalMs > 0) {
+					this.scheduleEventInterval(task.id, task.intervalMs, task.topic, task.payload, {
+						maxRuns: task.maxRuns,
+					});
+					restoredTasks += 1;
+				}
+			}
+		}
+
+		let restoredFailures = 0;
+		if (snapshot.failures && snapshot.failures.length > 0) {
+			this.failures.push(...snapshot.failures);
+			restoredFailures = snapshot.failures.length;
+		}
+		return { restoredTasks, restoredFailures };
+	}
 }
 
 export interface CancelTaskRequest {
@@ -229,9 +332,7 @@ export function createSchedulerScheduleOnceService(
 		name: "scheduler.scheduleOnce",
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => {
-			scheduler.scheduleOnce(req.id, req.delayMs, () => {
-				scheduler.publishEvent(req.topic, req.payload);
-			});
+			scheduler.scheduleEventOnce(req.id, req.delayMs, req.topic, req.payload);
 			return { scheduled: true };
 		},
 	};
@@ -244,16 +345,40 @@ export function createSchedulerScheduleIntervalService(
 		name: "scheduler.scheduleInterval",
 		requiredPermissions: ["scheduler:write"],
 		execute: async (req) => {
-			scheduler.scheduleInterval(
-				req.id,
-				req.intervalMs,
-				() => {
-					scheduler.publishEvent(req.topic, req.payload);
-				},
-				{ maxRuns: req.maxRuns },
-			);
+			scheduler.scheduleEventInterval(req.id, req.intervalMs, req.topic, req.payload, {
+				maxRuns: req.maxRuns,
+			});
 			return { scheduled: true };
 		},
+	};
+}
+
+export function createSchedulerStateExportService(
+	scheduler: SchedulerService,
+): OSService<Record<string, never>, ReturnType<SchedulerService["exportState"]>> {
+	return {
+		name: "scheduler.state.export",
+		requiredPermissions: ["scheduler:read"],
+		execute: async () => scheduler.exportState(),
+	};
+}
+
+export function createSchedulerStateImportService(
+	scheduler: SchedulerService,
+): OSService<
+	{
+		tasks?: SchedulerPersistedTask[];
+		failures?: SchedulerFailureRecord[];
+	},
+	{
+		restoredTasks: number;
+		restoredFailures: number;
+	}
+> {
+	return {
+		name: "scheduler.state.import",
+		requiredPermissions: ["scheduler:write"],
+		execute: async (req) => scheduler.restoreState(req),
 	};
 }
 
