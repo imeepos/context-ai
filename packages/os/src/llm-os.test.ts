@@ -257,6 +257,12 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(Array.isArray(feed.items)).toBe(true);
+			const backlog = await os.kernel.execute(
+				"system.alerts.backlog",
+				{ topic: "system.alert", overdueThresholdMs: 1000 },
+				context,
+			);
+			expect(typeof backlog.totalUnacked).toBe("number");
 			const breaches = await os.kernel.execute(
 				"system.alerts.breaches",
 				{ topic: "system.alert", windowMinutes: 10 },

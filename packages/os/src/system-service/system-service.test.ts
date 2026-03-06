@@ -32,6 +32,7 @@ import {
 	createSystemAlertsHotspotsService,
 	createSystemAlertsRecommendationsService,
 	createSystemAlertsFeedService,
+	createSystemAlertsBacklogService,
 	createSystemAlertsBreachesService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
@@ -869,6 +870,38 @@ describe("SystemService", () => {
 		expect(response.breaches.length).toBeGreaterThan(0);
 		expect(response.breaches.some((b) => b.metric === "critical_count")).toBe(true);
 		expect(response.breaches.some((b) => b.metric === "ack_p95_ms")).toBe(true);
+		vi.useRealTimers();
+	});
+
+	it("returns alert backlog age and overdue stats", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "b1", severity: "error" });
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
+		notification.send({ topic: "system.alert", message: "b2", severity: "critical" });
+		const ackCandidate = notification.query({ topic: "system.alert", severity: "critical", limit: 1 })[0];
+		if (ackCandidate) {
+			notification.ack({ id: ackCandidate.id });
+		}
+		vi.setSystemTime(new Date("2026-01-01T00:02:00.000Z"));
+
+		const service = createSystemAlertsBacklogService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", overdueThresholdMs: 60_000 },
+			{
+				appId: "app.demo",
+				sessionId: "s31",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.totalUnacked).toBe(1);
+		expect(response.oldestUnackedAgeMs).toBe(120000);
+		expect(response.newestUnackedAgeMs).toBe(120000);
+		expect(response.overdueCount).toBe(1);
+		expect(response.bySeverity.error).toBe(1);
 		vi.useRealTimers();
 	});
 });

@@ -1330,6 +1330,71 @@ export function createSystemAlertsFeedService(
 	};
 }
 
+export interface SystemAlertsBacklogRequest {
+	topic?: string;
+	severity?: NotificationSeverity;
+	overdueThresholdMs?: number;
+}
+
+export interface SystemAlertsBacklogResponse {
+	totalUnacked: number;
+	oldestUnackedAgeMs: number;
+	newestUnackedAgeMs: number;
+	overdueCount: number;
+	overdueThresholdMs: number;
+	bySeverity: Record<NotificationSeverity, number>;
+}
+
+export function createSystemAlertsBacklogService(
+	notificationService: NotificationService,
+): OSService<SystemAlertsBacklogRequest, SystemAlertsBacklogResponse> {
+	return {
+		name: "system.alerts.backlog",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const overdueThresholdMs = req.overdueThresholdMs && req.overdueThresholdMs > 0 ? req.overdueThresholdMs : 300000;
+			const unacked = notificationService.query({
+				topic: req.topic,
+				severity: req.severity,
+				acknowledged: false,
+			});
+			const now = Date.now();
+			const bySeverity: Record<NotificationSeverity, number> = {
+				info: 0,
+				warning: 0,
+				error: 0,
+				critical: 0,
+			};
+			let oldestUnackedAgeMs = 0;
+			let newestUnackedAgeMs = 0;
+			let overdueCount = 0;
+
+			for (const alert of unacked) {
+				bySeverity[alert.severity] += 1;
+				const ageMs = Math.max(0, now - new Date(alert.timestamp).getTime());
+				if (ageMs > oldestUnackedAgeMs) {
+					oldestUnackedAgeMs = ageMs;
+				}
+				if (newestUnackedAgeMs === 0 || ageMs < newestUnackedAgeMs) {
+					newestUnackedAgeMs = ageMs;
+				}
+				if (ageMs >= overdueThresholdMs) {
+					overdueCount += 1;
+				}
+			}
+
+			return {
+				totalUnacked: unacked.length,
+				oldestUnackedAgeMs,
+				newestUnackedAgeMs: unacked.length > 0 ? newestUnackedAgeMs : 0,
+				overdueCount,
+				overdueThresholdMs,
+				bySeverity,
+			};
+		},
+	};
+}
+
 export interface SystemAlertsBreachesRequest {
 	windowMinutes: number;
 	topic?: string;

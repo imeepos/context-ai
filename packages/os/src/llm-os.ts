@@ -80,6 +80,7 @@ import {
 	createSystemAlertsHotspotsService,
 	createSystemAlertsRecommendationsService,
 	createSystemAlertsFeedService,
+	createSystemAlertsBacklogService,
 	createSystemAlertsBreachesService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
@@ -291,6 +292,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		createSystemAlertsRecommendationsService(notificationService),
 	);
 	registerWhenEnabled("system.alerts.feed", () => createSystemAlertsFeedService(notificationService));
+	registerWhenEnabled("system.alerts.backlog", () => createSystemAlertsBacklogService(notificationService));
 	registerWhenEnabled("system.alerts.breaches", () => createSystemAlertsBreachesService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
