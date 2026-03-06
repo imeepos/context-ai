@@ -218,6 +218,8 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(typeof ackAll.acknowledged).toBe("number");
+			const cleanup = await os.kernel.execute("notification.cleanup", {}, context);
+			expect(typeof cleanup.notifications).toBe("number");
 			const unacked = await os.kernel.execute("system.alerts.unacked", { topic: "system.alert" }, context);
 			expect(typeof unacked.total).toBe("number");
 			const clearedAlerts = await os.kernel.execute(

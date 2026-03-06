@@ -61,6 +61,10 @@ export interface NotificationAckAllRequest {
 	until?: string;
 }
 
+export interface NotificationCleanupRequest {
+	olderThan?: string;
+}
+
 export interface NotificationStats {
 	sent: number;
 	dropped: {
@@ -198,6 +202,33 @@ export class NotificationService {
 			}
 		}
 		return count;
+	}
+
+	cleanup(request: NotificationCleanupRequest): { notifications: number; mutes: number } {
+		let removedNotifications = 0;
+		if (request.olderThan) {
+			const olderThanMs = Date.parse(request.olderThan);
+			if (!Number.isNaN(olderThanMs)) {
+				const retained = this.sent.filter((record) => Date.parse(record.timestamp) >= olderThanMs);
+				removedNotifications = this.sent.length - retained.length;
+				this.sent.length = 0;
+				this.sent.push(...retained);
+			}
+		}
+
+		let removedMutes = 0;
+		const now = Date.now();
+		for (const [topic, muteUntil] of this.topicMuteUntil.entries()) {
+			if (muteUntil <= now) {
+				this.topicMuteUntil.delete(topic);
+				removedMutes += 1;
+			}
+		}
+
+		return {
+			notifications: removedNotifications,
+			mutes: removedMutes,
+		};
 	}
 
 	clear(request: NotificationClearRequest): number {
@@ -385,5 +416,15 @@ export function createNotificationAckAllService(
 		execute: async (req) => ({
 			acknowledged: notification.ackAll(req),
 		}),
+	};
+}
+
+export function createNotificationCleanupService(
+	notification: NotificationService,
+): OSService<NotificationCleanupRequest, { notifications: number; mutes: number }> {
+	return {
+		name: "notification.cleanup",
+		requiredPermissions: ["notification:write"],
+		execute: async (req) => notification.cleanup(req),
 	};
 }

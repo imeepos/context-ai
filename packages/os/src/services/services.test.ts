@@ -474,4 +474,21 @@ describe("NotificationService", () => {
 		const unackedOps = notification.query({ topic: "ops.alert", acknowledged: false });
 		expect(unackedOps).toHaveLength(1);
 	});
+
+	it("cleans up old notifications and expired mutes", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "old" });
+		notification.muteTopic({ topic: "system.alert", durationMs: 1000 });
+
+		vi.setSystemTime(new Date("2026-01-01T00:00:10.000Z"));
+		notification.send({ topic: "ops.alert", message: "new" });
+		const cleaned = notification.cleanup({ olderThan: "2026-01-01T00:00:05.000Z" });
+		expect(cleaned.notifications).toBe(1);
+		expect(notification.query({ topic: "ops.alert" })).toHaveLength(1);
+		expect(cleaned.mutes).toBe(1);
+		vi.useRealTimers();
+	});
 });
