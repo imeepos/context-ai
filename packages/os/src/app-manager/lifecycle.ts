@@ -1,3 +1,5 @@
+import { OSError } from "../kernel/errors.js";
+
 export type AppLifecycleState = "installed" | "resolved" | "active" | "running" | "suspended" | "stopped";
 
 const transitions: Record<AppLifecycleState, AppLifecycleState[]> = {
@@ -20,7 +22,7 @@ export class AppLifecycleManager {
 		const current = this.getState(appId);
 		const allowedNext = transitions[current];
 		if (!allowedNext.includes(next)) {
-			throw new Error(`Invalid lifecycle transition: ${current} -> ${next}`);
+			throw new OSError("E_SERVICE_EXECUTION", `Invalid lifecycle transition: ${current} -> ${next}`);
 		}
 		this.states.set(appId, next);
 		return next;

@@ -3,6 +3,7 @@ import type { AppManifest } from "./manifest.js";
 import { AppPermissionStore } from "./permissions.js";
 import { AppQuotaManager, type AppQuota } from "./quota.js";
 import { AppRegistry } from "./registry.js";
+import { OSError } from "../kernel/errors.js";
 import type { OSService } from "../types/os.js";
 
 export class AppManager {
@@ -22,7 +23,7 @@ export class AppManager {
 
 	upgrade(manifest: AppManifest): void {
 		if (!this.registry.has(manifest.id)) {
-			throw new Error(`App not found: ${manifest.id}`);
+			throw new OSError("E_APP_NOT_REGISTERED", `App not found: ${manifest.id}`);
 		}
 		this.registry.install(manifest);
 		this.permissions.grant(manifest.id, manifest.permissions);
@@ -41,12 +42,12 @@ export class AppManager {
 	}
 
 	disable(appId: string): void {
-		if (!this.registry.has(appId)) throw new Error(`App not found: ${appId}`);
+		if (!this.registry.has(appId)) throw new OSError("E_APP_NOT_REGISTERED", `App not found: ${appId}`);
 		this.disabledApps.add(appId);
 	}
 
 	enable(appId: string): void {
-		if (!this.registry.has(appId)) throw new Error(`App not found: ${appId}`);
+		if (!this.registry.has(appId)) throw new OSError("E_APP_NOT_REGISTERED", `App not found: ${appId}`);
 		this.disabledApps.delete(appId);
 	}
 

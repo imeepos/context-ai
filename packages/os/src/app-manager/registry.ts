@@ -1,5 +1,6 @@
 import type { AppManifest } from "./manifest.js";
 import { validateManifest } from "./manifest.js";
+import { OSError } from "../kernel/errors.js";
 
 export class AppRegistry {
 	private readonly manifests = new Map<string, AppManifest>();
@@ -19,7 +20,7 @@ export class AppRegistry {
 
 	get(appId: string): AppManifest {
 		const manifest = this.manifests.get(appId);
-		if (!manifest) throw new Error(`App not found: ${appId}`);
+		if (!manifest) throw new OSError("E_APP_NOT_REGISTERED", `App not found: ${appId}`);
 		return manifest;
 	}
 

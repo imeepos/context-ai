@@ -110,7 +110,9 @@ describe("LLMOSKernel", () => {
 			execute: async () => ({ ok: true }),
 		});
 		await kernel.execute("quota.demo", {}, ctx);
-		await expect(kernel.execute("quota.demo", {}, ctx)).rejects.toThrow("quota");
+		await expect(kernel.execute("quota.demo", {}, ctx)).rejects.toMatchObject({
+			code: "E_QUOTA_EXCEEDED",
+		} satisfies Partial<OSError>);
 	});
 
 	it("throws E_SERVICE_NOT_FOUND for unknown service", async () => {
@@ -132,7 +134,9 @@ describe("LLMOSKernel", () => {
 		});
 
 		await kernel.execute("metric.demo", { fail: false }, ctx);
-		await expect(kernel.execute("metric.demo", { fail: true }, ctx)).rejects.toThrow("fail");
+		await expect(kernel.execute("metric.demo", { fail: true }, ctx)).rejects.toMatchObject({
+			code: "E_SERVICE_EXECUTION",
+		} satisfies Partial<OSError>);
 		const snapshot = kernel.metrics.snapshot("metric.demo");
 		expect(snapshot.total).toBe(2);
 		expect(snapshot.success).toBe(1);

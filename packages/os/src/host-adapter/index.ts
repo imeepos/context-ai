@@ -1,3 +1,4 @@
+import { OSError } from "../kernel/errors.js";
 import type { OSService } from "../types/os.js";
 
 export interface HostAdapterRequest {
@@ -20,7 +21,7 @@ export class HostAdapterRegistry {
 
 	async execute(request: HostAdapterRequest): Promise<unknown> {
 		const adapter = this.adapters.get(request.adapter);
-		if (!adapter) throw new Error(`Host adapter not found: ${request.adapter}`);
+		if (!adapter) throw new OSError("E_SERVICE_NOT_FOUND", `Host adapter not found: ${request.adapter}`);
 		return adapter.handle(request.action, request.payload);
 	}
 }

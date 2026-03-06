@@ -7,6 +7,7 @@ import type { PolicyInput } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 import type { TenantQuotaGovernor } from "../kernel/resource-governor.js";
 import { gzipSync } from "node:zlib";
+import { OSError } from "../kernel/errors.js";
 
 export interface SystemHealthResponse {
 	services: string[];
@@ -2311,7 +2312,7 @@ export function createSystemAuditExportService(
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			if (req.format && req.format !== "jsonl") {
-				throw new Error(`Unsupported audit export format: ${req.format}`);
+				throw new OSError("E_SERVICE_EXECUTION", `Unsupported audit export format: ${req.format}`);
 			}
 			let records = kernel.audit.list();
 			if (req.since) {

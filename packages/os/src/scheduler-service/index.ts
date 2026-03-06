@@ -1,3 +1,4 @@
+import { OSError } from "../kernel/errors.js";
 import type { OSService } from "../types/os.js";
 import type { EventBus } from "../kernel/event-bus.js";
 
@@ -89,7 +90,7 @@ export class SchedulerService {
 	}
 
 	scheduleInterval(id: string, intervalMs: number, fn: () => void, options?: { maxRuns?: number }): ScheduledTask {
-		if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
+		if (this.tasks.has(id)) throw new OSError("E_SERVICE_EXECUTION", `Task already exists: ${id}`);
 		let runs = 0;
 		const timer = setInterval(fn, intervalMs);
 		if (options?.maxRuns && options.maxRuns > 0) {
@@ -111,7 +112,7 @@ export class SchedulerService {
 	}
 
 	scheduleOnce(id: string, delayMs: number, fn: () => void): ScheduledTask {
-		if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
+		if (this.tasks.has(id)) throw new OSError("E_SERVICE_EXECUTION", `Task already exists: ${id}`);
 		const timer = setTimeout(() => {
 			fn();
 			this.tasks.delete(id);
@@ -230,7 +231,7 @@ export class SchedulerService {
 			backoffMs: number;
 		},
 	): ScheduledTask {
-		if (this.tasks.has(id)) throw new Error(`Task already exists: ${id}`);
+		if (this.tasks.has(id)) throw new OSError("E_SERVICE_EXECUTION", `Task already exists: ${id}`);
 		this.retryableDefinitions.set(id, { task, options });
 
 		let cancelled = false;

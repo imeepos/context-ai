@@ -1,3 +1,4 @@
+import { OSError } from "../kernel/errors.js";
 import type { OSService } from "../types/os.js";
 
 export interface ModelGenerateRequest {
@@ -25,7 +26,7 @@ export class ModelService {
 
 	async generate(request: ModelGenerateRequest): Promise<ModelGenerateResponse> {
 		const provider = this.providers.get(request.model);
-		if (!provider) throw new Error(`Model provider not found: ${request.model}`);
+		if (!provider) throw new OSError("E_SERVICE_NOT_FOUND", `Model provider not found: ${request.model}`);
 		const output = await provider.generate(request);
 		return {
 			model: request.model,

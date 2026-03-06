@@ -136,7 +136,10 @@ export class LLMOSKernel {
 					error: message,
 					errorCode: code,
 				});
-				throw error;
+				if (error instanceof OSError) {
+					throw error;
+				}
+				throw new OSError(code, message);
 			}
 		}
 
@@ -195,7 +198,10 @@ export class LLMOSKernel {
 				error: message,
 				errorCode: code,
 			});
-			throw error;
+			if (error instanceof OSError) {
+				throw error;
+			}
+			throw new OSError(code, message);
 		}
 	}
 }

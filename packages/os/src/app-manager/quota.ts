@@ -1,3 +1,5 @@
+import { OSError } from "../kernel/errors.js";
+
 export interface AppQuota {
 	maxToolCalls: number;
 	maxTokens: number;
@@ -28,10 +30,10 @@ export class AppQuotaManager {
 			tokens: current.tokens + (delta.tokens ?? 0),
 		};
 		if (next.toolCalls > quota.maxToolCalls) {
-			throw new Error(`Quota exceeded: toolCalls for ${appId}`);
+			throw new OSError("E_QUOTA_EXCEEDED", `Quota exceeded: toolCalls for ${appId}`);
 		}
 		if (next.tokens > quota.maxTokens) {
-			throw new Error(`Quota exceeded: tokens for ${appId}`);
+			throw new OSError("E_QUOTA_EXCEEDED", `Quota exceeded: tokens for ${appId}`);
 		}
 		this.usage.set(appId, next);
 	}

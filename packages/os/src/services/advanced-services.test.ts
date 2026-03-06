@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { HostAdapterRegistry } from "../host-adapter/index.js";
+import { OSError } from "../kernel/errors.js";
 import { MediaService } from "../media-service/index.js";
 import { ModelService } from "../model-service/index.js";
 import { PackageService } from "../package-service/index.js";
@@ -15,6 +16,13 @@ describe("ModelService", () => {
 		});
 		const output = await model.generate({ model: "echo", prompt: "hello" });
 		expect(output.output).toBe("ok:hello");
+	});
+
+	it("returns typed error when provider is missing", async () => {
+		const model = new ModelService();
+		await expect(model.generate({ model: "missing", prompt: "hello" })).rejects.toMatchObject({
+			code: "E_SERVICE_NOT_FOUND",
+		} satisfies Partial<OSError>);
 	});
 });
 
@@ -72,6 +80,13 @@ describe("HostAdapterRegistry", () => {
 		});
 		const result = await registry.execute({ adapter: "sensor", action: "read" });
 		expect(result).toEqual({ action: "read" });
+	});
+
+	it("returns typed error when adapter is missing", async () => {
+		const registry = new HostAdapterRegistry();
+		await expect(registry.execute({ adapter: "missing", action: "read" })).rejects.toMatchObject({
+			code: "E_SERVICE_NOT_FOUND",
+		} satisfies Partial<OSError>);
 	});
 });
 

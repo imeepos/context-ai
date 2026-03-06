@@ -4,7 +4,8 @@
 - [x] M8(架构收敛)-1: 移除遗留模块 `src/bash` 与 `src/file-manager`，统一收口到 `shell-service` / `file-service`
 - [x] M8(架构收敛)-2: 清理未接入服务链的遗留 `config/core/utils` 孤岛模块，避免重复实现与发布污染
 - [x] M8(架构收敛)-3: `package.json` 公开面收口（`exports`）并剔除未使用依赖，降低供应链与维护成本
-- [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 130 passed, build: pass）
+- [x] M8(架构收敛)-4: 统一异常语义（Kernel + App/Model/Host/Scheduler/System 关键路径）改为 `OSError` 错误码输出
+- [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 133 passed, build: pass）
 - [x] M7(补缺)-11: 治理状态统一快照与恢复 `system.governance.state.export/import/persist/recover`
 - [x] M6(自治运维阶段)-1: 自动修复计划 `system.alerts.auto-remediate.plan`（规则化动作编排）
 - [x] M6(自治运维阶段)-2: 自动修复执行 `system.alerts.auto-remediate.execute`（审批开关 + dry-run）
@@ -68,7 +69,7 @@
 - [x] 统一工厂：`createDefaultLLMOS()` 与默认服务注册
 - [x] 安全治理：`PolicyEngine`（路径、命令、网络、权限）+ `AuditLog`
 - [x] 可观测基础：服务执行审计、Shell 执行审计、事件总线
-- [x] TDD：已引入 `vitest`，完成 130 个测试并通过
+- [x] TDD：已引入 `vitest`，完成 133 个测试并通过
 - [x] P1: `MediaService / UIService / PackageService`
 - [x] P2: `HostAdapterRegistry`（位置/蓝牙/传感器插件化入口）
 - [x] Model 运行服务：`ModelService`（provider registry + 统一调用）

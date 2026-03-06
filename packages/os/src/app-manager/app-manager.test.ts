@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AppManager } from "./index.js";
+import { OSError } from "../kernel/errors.js";
 
 describe("AppManager", () => {
 	it("installs app and grants manifest permissions", () => {
@@ -44,6 +45,9 @@ describe("AppManager", () => {
 		);
 		manager.quota.consume("app.quota", { toolCalls: 1, tokens: 5 });
 		expect(() => manager.quota.consume("app.quota", { toolCalls: 1 })).toThrow("Quota exceeded");
+		expect(() => manager.quota.consume("app.quota", { toolCalls: 1 })).toThrowError(
+			expect.objectContaining({ code: "E_QUOTA_EXCEEDED" } satisfies Partial<OSError>),
+		);
 	});
 
 	it("supports disable/enable and uninstall", () => {
@@ -82,5 +86,21 @@ describe("AppManager", () => {
 		});
 		expect(manager.registry.get("app.up").version).toBe("1.1.0");
 		expect(manager.permissions.has("app.up", "store:write")).toBe(true);
+	});
+
+	it("returns typed error for missing app operations", () => {
+		const manager = new AppManager();
+		expect(() => manager.enable("missing-app")).toThrowError(
+			expect.objectContaining({ code: "E_APP_NOT_REGISTERED" } satisfies Partial<OSError>),
+		);
+		expect(() =>
+			manager.upgrade({
+				id: "missing-app",
+				name: "Missing",
+				version: "1.0.0",
+				entry: "index.js",
+				permissions: [],
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_APP_NOT_REGISTERED" } satisfies Partial<OSError>));
 	});
 });
