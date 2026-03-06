@@ -26,6 +26,7 @@ import {
 	createSystemAlertsIncidentsService,
 	createSystemAlertsDigestService,
 	createSystemAlertsReportService,
+	createSystemAlertsReportCompactService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -675,5 +676,23 @@ describe("SystemService", () => {
 		expect(typeof response.slo.avgAckLatencyMs).toBe("number");
 		expect(typeof response.digest).toBe("string");
 		vi.useRealTimers();
+	});
+
+	it("returns compact alert report", async () => {
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		const service = createSystemAlertsReportCompactService(notification);
+		const response = await service.execute(
+			{ topic: "system.alert", windowMinutes: 60 },
+			{
+				appId: "app.demo",
+				sessionId: "s24",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(typeof response.summary).toBe("string");
+		expect(response.summary).toContain("total=");
 	});
 });

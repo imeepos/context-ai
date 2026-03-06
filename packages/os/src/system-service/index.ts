@@ -930,6 +930,36 @@ export function createSystemAlertsReportService(
 	};
 }
 
+export interface SystemAlertsReportCompactResponse {
+	summary: string;
+}
+
+export function createSystemAlertsReportCompactService(
+	notificationService: NotificationService,
+): OSService<SystemAlertsReportRequest, SystemAlertsReportCompactResponse> {
+	return {
+		name: "system.alerts.report.compact",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const report = await createSystemAlertsReportService(notificationService).execute(
+				req,
+				{
+					appId: "system",
+					sessionId: "system",
+					permissions: ["system:read"],
+					workingDirectory: process.cwd(),
+				},
+			);
+			const topSeverities = Object.entries(report.trends.bySeverity)
+				.map(([key, value]) => `${key}:${value}`)
+				.join(",");
+			return {
+				summary: `total=${report.trends.total};window=${report.trends.windowMinutes}m;ackP95=${report.slo.p95AckLatencyMs};sev=${topSeverities}`,
+			};
+		},
+	};
+}
+
 function thisEscapeCsv(value: string): string {
 	const escaped = value.replaceAll('"', '""');
 	return `"${escaped}"`;
