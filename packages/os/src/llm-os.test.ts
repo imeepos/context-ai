@@ -318,6 +318,23 @@ describe("createDefaultLLMOS", () => {
 			expect(Array.isArray(remediationAudit.records)).toBe(true);
 			const slo = await os.kernel.execute("system.slo", {}, context);
 			expect(typeof slo.global.successRate).toBe("number");
+			await os.kernel.execute(
+				"system.slo.rules.upsert",
+				{
+					rule: {
+						id: "rule-demo",
+						metric: "global_error_rate",
+						operator: "gt",
+						threshold: 0.5,
+						severity: "warning",
+					},
+				},
+				context,
+			);
+			const sloRules = await os.kernel.execute("system.slo.rules.list", {}, context);
+			expect(sloRules.rules.some((r: { id: string }) => r.id === "rule-demo")).toBe(true);
+			const sloBreaches = await os.kernel.execute("system.slo.rules.evaluate", {}, context);
+			expect(Array.isArray(sloBreaches.breaches)).toBe(true);
 			const policyVersion = await os.kernel.execute("system.policy.version.create", { label: "test" }, context);
 			expect(typeof policyVersion.versionId).toBe("string");
 			const policyVersions = await os.kernel.execute("system.policy.version.list", {}, context);

@@ -2132,6 +2132,16 @@ export interface SystemSLOResponse {
 	};
 }
 
+export interface SLOThresholdRule {
+	id: string;
+	metric: "global_success_rate" | "global_error_rate" | "alert_ack_p95_ms";
+	operator: "gt" | "lt";
+	threshold: number;
+	severity: "warning" | "critical";
+}
+
+const sloRules = new Map<string, SLOThresholdRule>();
+
 export function createSystemSLOService(
 	kernel: LLMOSKernel,
 	notificationService: NotificationService,
@@ -2172,6 +2182,85 @@ export function createSystemSLOService(
 					p95AckLatencyMs: alertSLO.p95AckLatencyMs,
 				},
 			};
+		},
+	};
+}
+
+export function createSystemSLORulesUpsertService(): OSService<{ rule: SLOThresholdRule }, { rule: SLOThresholdRule }> {
+	return {
+		name: "system.slo.rules.upsert",
+		requiredPermissions: ["system:write"],
+		execute: async (req) => {
+			sloRules.set(req.rule.id, req.rule);
+			return { rule: req.rule };
+		},
+	};
+}
+
+export function createSystemSLORulesListService(): OSService<Record<string, never>, { rules: SLOThresholdRule[] }> {
+	return {
+		name: "system.slo.rules.list",
+		requiredPermissions: ["system:read"],
+		execute: async () => ({
+			rules: [...sloRules.values()],
+		}),
+	};
+}
+
+export function createSystemSLORulesEvaluateService(
+	kernel: LLMOSKernel,
+	notificationService: NotificationService,
+): OSService<
+	Record<string, never>,
+	{
+		breaches: Array<{
+			ruleId: string;
+			metric: SLOThresholdRule["metric"];
+			value: number;
+			threshold: number;
+			severity: SLOThresholdRule["severity"];
+		}>;
+	}
+> {
+	return {
+		name: "system.slo.rules.evaluate",
+		requiredPermissions: ["system:read"],
+		execute: async () => {
+			const slo = await createSystemSLOService(kernel, notificationService).execute(
+				{},
+				{
+					appId: "system",
+					sessionId: "system",
+					permissions: ["system:read"],
+					workingDirectory: process.cwd(),
+				},
+			);
+			const valueByMetric: Record<SLOThresholdRule["metric"], number> = {
+				global_success_rate: slo.global.successRate,
+				global_error_rate: slo.global.errorRate,
+				alert_ack_p95_ms: slo.alerting.p95AckLatencyMs,
+			};
+			const breaches: Array<{
+				ruleId: string;
+				metric: SLOThresholdRule["metric"];
+				value: number;
+				threshold: number;
+				severity: SLOThresholdRule["severity"];
+			}> = [];
+			for (const rule of sloRules.values()) {
+				const value = valueByMetric[rule.metric];
+				const matched = rule.operator === "gt" ? value > rule.threshold : value < rule.threshold;
+				if (matched) {
+					breaches.push({
+						ruleId: rule.id,
+						metric: rule.metric,
+						value,
+						threshold: rule.threshold,
+						severity: rule.severity,
+					});
+				}
+			}
+			return { breaches };
 		},
 	};
 }

@@ -113,6 +113,9 @@ import {
 	createSystemPolicySimulateBatchService,
 	createSystemPolicyGuardApplyService,
 	createSystemSLOService,
+	createSystemSLORulesUpsertService,
+	createSystemSLORulesListService,
+	createSystemSLORulesEvaluateService,
 	createSystemAuditExportService,
 	createSystemQuotaService,
 	createSystemQuotaAdjustService,
@@ -345,6 +348,11 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	);
 	registerWhenEnabled("system.alerts.auto-remediate.audit", () => createSystemAlertsAutoRemediateAuditService());
 	registerWhenEnabled("system.slo", () => createSystemSLOService(kernel, notificationService));
+	registerWhenEnabled("system.slo.rules.upsert", () => createSystemSLORulesUpsertService());
+	registerWhenEnabled("system.slo.rules.list", () => createSystemSLORulesListService());
+	registerWhenEnabled("system.slo.rules.evaluate", () =>
+		createSystemSLORulesEvaluateService(kernel, notificationService),
+	);
 	registerWhenEnabled("system.audit.export", () => createSystemAuditExportService(kernel, securityService));
 	registerWhenEnabled("system.quota", () => createSystemQuotaService(tenantQuotaGovernor));
 	registerWhenEnabled("system.quota.adjust", () => createSystemQuotaAdjustService(tenantQuotaGovernor));

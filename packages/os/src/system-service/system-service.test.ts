@@ -46,6 +46,9 @@ import {
 	createSystemPolicySimulateBatchService,
 	createSystemPolicyGuardApplyService,
 	createSystemSLOService,
+	createSystemSLORulesUpsertService,
+	createSystemSLORulesListService,
+	createSystemSLORulesEvaluateService,
 	createSystemAuditExportService,
 	createSystemQuotaService,
 	createSystemQuotaAdjustService,
@@ -1165,6 +1168,46 @@ describe("SystemService", () => {
 		);
 		expect(response.global.total).toBeGreaterThan(0);
 		expect(typeof response.alerting.p95AckLatencyMs).toBe("number");
+	});
+
+	it("manages and evaluates slo threshold rules", async () => {
+		const kernel = new LLMOSKernel();
+		kernel.registerService({
+			name: "slo.rules.fail",
+			requiredPermissions: [],
+			execute: async () => {
+				throw new Error("boom");
+			},
+		});
+		await expect(
+			kernel.execute("slo.rules.fail", {}, { appId: "app.demo", sessionId: "s36b", permissions: [], workingDirectory: process.cwd() }),
+		).rejects.toThrow();
+		const notification = new NotificationService(new EventBus());
+		const upsert = createSystemSLORulesUpsertService();
+		const list = createSystemSLORulesListService();
+		const evaluate = createSystemSLORulesEvaluateService(kernel, notification);
+		await upsert.execute(
+			{
+				rule: {
+					id: "r-error",
+					metric: "global_error_rate",
+					operator: "gt",
+					threshold: 0,
+					severity: "warning",
+				},
+			},
+			{ appId: "app.demo", sessionId: "s36b", permissions: ["system:write"], workingDirectory: process.cwd() },
+		);
+		const rules = await list.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s36b", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(rules.rules.some((item) => item.id === "r-error")).toBe(true);
+		const result = await evaluate.execute(
+			{},
+			{ appId: "app.demo", sessionId: "s36b", permissions: ["system:read"], workingDirectory: process.cwd() },
+		);
+		expect(result.breaches.some((item) => item.ruleId === "r-error")).toBe(true);
 	});
 
 	it("exports audit incrementally with signature", async () => {

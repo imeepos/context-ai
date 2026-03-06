@@ -1,7 +1,7 @@
 # CTP LLM OS 顶层架构设计与功能规划
 
 ## 实施状态（2026-03-06）
-- [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 124 passed, build: pass）
+- [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 125 passed, build: pass）
 - [x] M6(自治运维阶段)-1: 自动修复计划 `system.alerts.auto-remediate.plan`（规则化动作编排）
 - [x] M6(自治运维阶段)-2: 自动修复执行 `system.alerts.auto-remediate.execute`（审批开关 + dry-run）
 - [x] M6(治理阶段)-3: 策略版本化 `system.policy.version.create/list/rollback`
@@ -17,7 +17,7 @@
 - [x] M7(闭环阶段)-3: 策略变更守护 `system.policy.guard.apply`（变更前模拟 + 变更后健康检查 + 自动回滚）
 - [x] M7(生产阶段)-4: 调度持久化存储适配器（`StoreSchedulerStateAdapter` + auto persist/recover）
 - [x] M7(生产阶段)-5: 通知通道标准化配置 `notification.channel.configure/stats`（Webhook/Slack/Email）
-- [ ] M7(生产阶段)-6: SLO 阈值规则管理与违约告警
+- [x] M7(生产阶段)-6: SLO 阈值规则管理 `system.slo.rules.upsert/list/evaluate`
 - [ ] M7(多租户阶段)-7: 配额策略中心（按等级/时段/负载）
 - [ ] M7(多租户阶段)-8: 热点租户隔离与限流联动
 - [ ] M7(安全阶段)-9: 审计签名密钥轮换与托管接口
@@ -64,7 +64,7 @@
 - [x] 统一工厂：`createDefaultLLMOS()` 与默认服务注册
 - [x] 安全治理：`PolicyEngine`（路径、命令、网络、权限）+ `AuditLog`
 - [x] 可观测基础：服务执行审计、Shell 执行审计、事件总线
-- [x] TDD：已引入 `vitest`，完成 124 个测试并通过
+- [x] TDD：已引入 `vitest`，完成 125 个测试并通过
 - [x] P1: `MediaService / UIService / PackageService`
 - [x] P2: `HostAdapterRegistry`（位置/蓝牙/传感器插件化入口）
 - [x] Model 运行服务：`ModelService`（provider registry + 统一调用）
