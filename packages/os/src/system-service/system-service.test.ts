@@ -245,6 +245,17 @@ describe("SystemService", () => {
 		);
 		expect(deltaAll.apps).toHaveLength(1);
 		expect(deltaAll.apps[0]?.pages).toContain("todo://list");
+		const deltaOne = await delta.execute(
+			{ appId: "todo" },
+			{
+				appId: "app.demo",
+				sessionId: "s6-install-report",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(deltaOne.apps).toHaveLength(1);
+		expect(deltaOne.apps[0]?.appId).toBe("todo");
 	});
 
 	it("returns all capabilities map", async () => {

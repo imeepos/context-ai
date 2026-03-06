@@ -211,7 +211,7 @@ interface AppInstallDeltaReport {
 
 ## 10. 详细开发 TODO LIST（执行版）
 
-### P0 基础契约（进行中）
+### P0 基础契约（已完成）
 - [x] 定义 `AppManifestV1`、`AppPageEntry`、`AppEntryV1`
 - [x] 增加旧版 manifest 迁移函数（`entry: string` -> `entry.pages[]`）
 - [x] 增加 route 协议校验（`appId://pageId`）
