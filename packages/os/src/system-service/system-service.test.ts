@@ -29,6 +29,7 @@ import {
 	createSystemAlertsReportCompactService,
 	createSystemAlertsFlappingService,
 	createSystemAlertsTimelineService,
+	createSystemAlertsHotspotsService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -750,6 +751,38 @@ describe("SystemService", () => {
 		expect(response.buckets.length).toBe(2);
 		expect(response.buckets[0]?.total).toBe(2);
 		expect(response.buckets[1]?.total).toBe(1);
+		vi.useRealTimers();
+	});
+
+	it("returns alert hotspots with growth delta", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+
+		vi.setSystemTime(new Date("2026-01-01T00:05:00.000Z"));
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" }); // previous window
+
+		vi.setSystemTime(new Date("2026-01-01T00:12:00.000Z"));
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "db down", severity: "critical" });
+		notification.send({ topic: "system.alert", message: "cache miss", severity: "warning" });
+
+		vi.setSystemTime(new Date("2026-01-01T00:15:00.000Z"));
+		const service = createSystemAlertsHotspotsService(notification);
+		const response = await service.execute(
+			{ windowMinutes: 5, topic: "system.alert", limit: 5 },
+			{
+				appId: "app.demo",
+				sessionId: "s27",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.items[0]?.message).toBe("db down");
+		expect(response.items[0]?.currentCount).toBe(2);
+		expect(response.items[0]?.previousCount).toBe(1);
+		expect(response.items[0]?.delta).toBe(1);
 		vi.useRealTimers();
 	});
 });

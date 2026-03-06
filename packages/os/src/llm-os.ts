@@ -76,6 +76,7 @@ import {
 	createSystemAlertsReportCompactService,
 	createSystemAlertsFlappingService,
 	createSystemAlertsTimelineService,
+	createSystemAlertsHotspotsService,
 	createSystemCapabilitiesService,
 	createSystemCapabilitiesListService,
 	createSystemDependenciesService,
@@ -280,6 +281,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	);
 	registerWhenEnabled("system.alerts.flapping", () => createSystemAlertsFlappingService(notificationService));
 	registerWhenEnabled("system.alerts.timeline", () => createSystemAlertsTimelineService(notificationService));
+	registerWhenEnabled("system.alerts.hotspots", () => createSystemAlertsHotspotsService(notificationService));
 	registerWhenEnabled("system.snapshot", () =>
 		createSystemSnapshotService(kernel, {
 			netService,

@@ -233,6 +233,12 @@ describe("createDefaultLLMOS", () => {
 				context,
 			);
 			expect(Array.isArray(timeline.buckets)).toBe(true);
+			const hotspots = await os.kernel.execute(
+				"system.alerts.hotspots",
+				{ topic: "system.alert", windowMinutes: 10, limit: 5 },
+				context,
+			);
+			expect(Array.isArray(hotspots.items)).toBe(true);
 			const alertsList = await os.kernel.execute("notification.list", { topic: "system.alert", limit: 1 }, context);
 			if (alertsList.notifications[0]?.id) {
 				const ack = await os.kernel.execute(
