@@ -71,7 +71,7 @@ export function validateManifest(manifest: AppManifest): void {
 		throw new OSError("E_VALIDATION_FAILED", "Manifest entry.pages is required");
 	}
 	const seenRoutes = new Set<string>();
-	let hasDefault = false;
+	let defaultCount = 0;
 	for (const page of normalized.entry.pages) {
 		if (!page.id.trim()) throw new OSError("E_VALIDATION_FAILED", "Manifest page id is required");
 		if (!page.route.trim()) throw new OSError("E_VALIDATION_FAILED", "Manifest page route is required");
@@ -94,10 +94,13 @@ export function validateManifest(manifest: AppManifest): void {
 		}
 		seenRoutes.add(page.route);
 		if (page.default) {
-			hasDefault = true;
+			defaultCount += 1;
 		}
 	}
-	if (!hasDefault && normalized.entry.pages.length > 1) {
+	if (defaultCount > 1) {
+		throw new OSError("E_VALIDATION_FAILED", "Manifest default page must be unique");
+	}
+	if (defaultCount === 0 && normalized.entry.pages.length > 1) {
 		throw new OSError("E_VALIDATION_FAILED", "Manifest default page is required for multi-page entry");
 	}
 }

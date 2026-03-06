@@ -118,4 +118,35 @@ describe("AppManifest v1", () => {
 			}),
 		).toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
 	});
+
+	it("rejects multiple default pages", () => {
+		expect(() =>
+			validateManifest({
+				id: "todo",
+				name: "Todo",
+				version: "1.0.0",
+				entry: {
+					pages: [
+						{
+							id: "list",
+							route: "todo://list",
+							name: "List",
+							description: "Show todo list",
+							path: "src/pages/list.tsx",
+							default: true,
+						},
+						{
+							id: "detail",
+							route: "todo://detail",
+							name: "Detail",
+							description: "Show todo detail",
+							path: "src/pages/detail.tsx",
+							default: true,
+						},
+					],
+				},
+				permissions: ["app:manage"],
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+	});
 });
