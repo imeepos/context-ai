@@ -722,6 +722,94 @@ describe("AppManager", () => {
 		expect(reverted.restoredVersion).toBe("1.0.0");
 	});
 
+	it("consumes rollback token after successful rollback", async () => {
+		const manager = new AppManager();
+		const install = createAppInstallService(manager);
+		const rollback = createAppInstallRollbackService(manager);
+		await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.0.0",
+					entry: {
+						pages: [
+							{
+								id: "list",
+								route: "todo://list",
+								name: "List",
+								description: "Show todo list",
+								path: "src/todo/list.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:manage", "app:read"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-once",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		const upgraded = await install.execute(
+			{
+				manifest: {
+					id: "todo",
+					name: "Todo",
+					version: "1.1.0",
+					entry: {
+						pages: [
+							{
+								id: "board",
+								route: "todo://board",
+								name: "Board",
+								description: "Show todo board",
+								path: "src/todo/board.tsx",
+								default: true,
+							},
+						],
+					},
+					permissions: ["app:manage", "app:read"],
+				},
+			},
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-once",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		await rollback.execute(
+			{
+				appId: "todo",
+				rollbackToken: upgraded.report.rollbackToken,
+			},
+			{
+				appId: "todo",
+				sessionId: "s-install-rollback-once",
+				permissions: ["app:manage"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		await expect(
+			rollback.execute(
+				{
+					appId: "todo",
+					rollbackToken: upgraded.report.rollbackToken,
+				},
+				{
+					appId: "todo",
+					sessionId: "s-install-rollback-once",
+					permissions: ["app:manage"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
+	});
+
 	it("restores previous quota on rollback", async () => {
 		const manager = new AppManager();
 		const install = createAppInstallService(manager);
