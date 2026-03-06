@@ -656,6 +656,43 @@ export function createSystemAlertsPolicyService(
 	};
 }
 
+export interface SystemAlertsTrendsRequest {
+	windowMinutes: number;
+	topic?: string;
+}
+
+export interface SystemAlertsTrendsResponse {
+	windowMinutes: number;
+	total: number;
+	bySeverity: Partial<Record<NotificationSeverity, number>>;
+}
+
+export function createSystemAlertsTrendsService(
+	notificationService: NotificationService,
+): OSService<SystemAlertsTrendsRequest, SystemAlertsTrendsResponse> {
+	return {
+		name: "system.alerts.trends",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			const windowMinutes = req.windowMinutes > 0 ? req.windowMinutes : 1;
+			const since = new Date(Date.now() - windowMinutes * 60 * 1000).toISOString();
+			const alerts = notificationService.query({
+				topic: req.topic,
+				since,
+			});
+			const bySeverity: Partial<Record<NotificationSeverity, number>> = {};
+			for (const alert of alerts) {
+				bySeverity[alert.severity] = (bySeverity[alert.severity] ?? 0) + 1;
+			}
+			return {
+				windowMinutes,
+				total: alerts.length,
+				bySeverity,
+			};
+		},
+	};
+}
+
 function thisEscapeCsv(value: string): string {
 	const escaped = value.replaceAll('"', '""');
 	return `"${escaped}"`;

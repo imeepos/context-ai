@@ -21,6 +21,7 @@ import {
 	createSystemAlertsTopicsService,
 	createSystemAlertsUnackedService,
 	createSystemAlertsPolicyService,
+	createSystemAlertsTrendsService,
 	createSystemNetCircuitService,
 	createSystemNetCircuitResetService,
 	createSystemPolicyEvaluateService,
@@ -537,5 +538,33 @@ describe("SystemService", () => {
 		expect(response.policy.dedupeWindowMs).toBe(1000);
 		expect(response.policy.rateLimit?.limit).toBe(2);
 		expect(response.policy.retentionLimit).toBe(100);
+	});
+
+	it("returns alert trends in time window", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"));
+		const bus = new EventBus();
+		const notification = new NotificationService(bus);
+		notification.send({ topic: "system.alert", message: "t1", severity: "error" });
+		vi.setSystemTime(new Date("2026-01-01T00:01:00.000Z"));
+		notification.send({ topic: "system.alert", message: "t2", severity: "critical" });
+		vi.setSystemTime(new Date("2026-01-01T00:02:00.000Z"));
+		notification.send({ topic: "system.alert", message: "t3", severity: "warning" });
+		vi.setSystemTime(new Date("2026-01-01T00:03:00.000Z"));
+
+		const service = createSystemAlertsTrendsService(notification);
+		const response = await service.execute(
+			{ windowMinutes: 2 },
+			{
+				appId: "app.demo",
+				sessionId: "s19",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.total).toBe(2);
+		expect(response.bySeverity.critical).toBe(1);
+		expect(response.bySeverity.warning).toBe(1);
+		vi.useRealTimers();
 	});
 });
