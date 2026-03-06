@@ -306,6 +306,8 @@ export interface SystemErrorsRequest {
 export interface SystemErrorsResponse {
 	totalFailures: number;
 	byErrorCode: Record<string, number>;
+	byReason: Record<string, number>;
+	topReasons: Array<{ reason: string; count: number }>;
 }
 
 export function createSystemErrorsService(
@@ -320,13 +322,22 @@ export function createSystemErrorsService(
 				records = records.filter((record) => record.service === req.service);
 			}
 			const byErrorCode: Record<string, number> = {};
+			const byReason: Record<string, number> = {};
 			for (const record of records) {
 				const code = record.errorCode ?? "UNKNOWN";
 				byErrorCode[code] = (byErrorCode[code] ?? 0) + 1;
+				const reason = record.error?.trim() || "UNKNOWN";
+				byReason[reason] = (byReason[reason] ?? 0) + 1;
 			}
+			const topReasons = Object.entries(byReason)
+				.map(([reason, count]) => ({ reason, count }))
+				.sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason))
+				.slice(0, 10);
 			return {
 				totalFailures: records.length,
 				byErrorCode,
+				byReason,
+				topReasons,
 			};
 		},
 	};

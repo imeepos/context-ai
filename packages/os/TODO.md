@@ -7,6 +7,7 @@
 - [x] M8(架构收敛)-4: 统一异常语义（Kernel + App/Model/Host/Scheduler/System 关键路径）改为 `OSError` 错误码输出
 - [x] M8(架构收敛)-5: 非测试代码 `throw new Error` 清零，统一 typed error 通道
 - [x] M8(架构收敛)-6: 错误码细分治理（`E_VALIDATION_FAILED`/`E_DEPENDENCY_ERROR`/`E_EXTERNAL_FAILURE`）并补齐断言
+- [x] M8(架构收敛)-7: `system.errors` 增强根因观测（`byReason` + `topReasons`）
 - [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 135 passed, build: pass）
 - [x] M7(补缺)-11: 治理状态统一快照与恢复 `system.governance.state.export/import/persist/recover`
 - [x] M6(自治运维阶段)-1: 自动修复计划 `system.alerts.auto-remediate.plan`（规则化动作编排）
