@@ -9,8 +9,8 @@ export interface AppManifest {
 }
 
 export function validateManifest(manifest: AppManifest): void {
-	if (!manifest.id.trim()) throw new OSError("E_SERVICE_EXECUTION", "Manifest id is required");
-	if (!manifest.name.trim()) throw new OSError("E_SERVICE_EXECUTION", "Manifest name is required");
-	if (!manifest.version.trim()) throw new OSError("E_SERVICE_EXECUTION", "Manifest version is required");
-	if (!manifest.entry.trim()) throw new OSError("E_SERVICE_EXECUTION", "Manifest entry is required");
+	if (!manifest.id.trim()) throw new OSError("E_VALIDATION_FAILED", "Manifest id is required");
+	if (!manifest.name.trim()) throw new OSError("E_VALIDATION_FAILED", "Manifest name is required");
+	if (!manifest.version.trim()) throw new OSError("E_VALIDATION_FAILED", "Manifest version is required");
+	if (!manifest.entry.trim()) throw new OSError("E_VALIDATION_FAILED", "Manifest entry is required");
 }

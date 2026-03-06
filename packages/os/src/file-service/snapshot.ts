@@ -16,7 +16,7 @@ export class SnapshotStore {
 
 	async rollback(snapshotId: string): Promise<void> {
 		const snapshot = this.snapshots.get(snapshotId);
-		if (!snapshot) throw new OSError("E_SERVICE_EXECUTION", `Snapshot not found: ${snapshotId}`);
+		if (!snapshot) throw new OSError("E_SERVICE_NOT_FOUND", `Snapshot not found: ${snapshotId}`);
 		await writeFile(snapshot.path, snapshot.content, "utf8");
 	}
 }

@@ -408,7 +408,7 @@ export class NotificationService {
 						body: JSON.stringify(record),
 					});
 					if (!response.ok) {
-						throw new OSError("E_SERVICE_EXECUTION", `webhook status=${response.status}`);
+						throw new OSError("E_EXTERNAL_FAILURE", `webhook status=${response.status}`);
 					}
 				},
 			});
@@ -426,7 +426,7 @@ export class NotificationService {
 						}),
 					});
 					if (!response.ok) {
-						throw new OSError("E_SERVICE_EXECUTION", `slack status=${response.status}`);
+						throw new OSError("E_EXTERNAL_FAILURE", `slack status=${response.status}`);
 					}
 				},
 			});
@@ -447,7 +447,7 @@ export class NotificationService {
 						}),
 					});
 					if (!response.ok) {
-						throw new OSError("E_SERVICE_EXECUTION", `email status=${response.status}`);
+						throw new OSError("E_EXTERNAL_FAILURE", `email status=${response.status}`);
 					}
 				},
 			});

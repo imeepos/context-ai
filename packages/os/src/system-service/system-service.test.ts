@@ -7,6 +7,7 @@ import { PolicyEngine } from "../kernel/policy-engine.js";
 import { SchedulerService } from "../scheduler-service/index.js";
 import { SecurityService } from "../security-service/index.js";
 import { TenantQuotaGovernor } from "../kernel/resource-governor.js";
+import { OSError } from "../kernel/errors.js";
 import { vi } from "vitest";
 import {
 	createSystemAuditService,
@@ -1242,7 +1243,7 @@ describe("SystemService", () => {
 				{ format: "xml" as "jsonl" },
 				{ appId: "app.demo", sessionId: "s37", permissions: ["system:read"], workingDirectory: process.cwd() },
 			),
-		).rejects.toThrow("Unsupported audit export format");
+		).rejects.toMatchObject({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>);
 	});
 
 	it("rotates and activates audit signing keys", async () => {

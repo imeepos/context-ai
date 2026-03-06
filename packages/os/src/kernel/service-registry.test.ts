@@ -12,6 +12,13 @@ describe("ServiceRegistry", () => {
 				execute: async () => ({ ok: true }),
 			}),
 		).toThrow("Service dependency missing");
+		expect(() =>
+			registry.register({
+				name: "c",
+				dependencies: ["z"],
+				execute: async () => ({ ok: true }),
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_DEPENDENCY_ERROR" } satisfies Partial<OSError>));
 	});
 
 	it("returns dependency graph", () => {

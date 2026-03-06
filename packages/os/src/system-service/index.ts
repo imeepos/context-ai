@@ -2312,7 +2312,7 @@ export function createSystemAuditExportService(
 		requiredPermissions: ["system:read"],
 		execute: async (req) => {
 			if (req.format && req.format !== "jsonl") {
-				throw new OSError("E_SERVICE_EXECUTION", `Unsupported audit export format: ${req.format}`);
+				throw new OSError("E_VALIDATION_FAILED", `Unsupported audit export format: ${req.format}`);
 			}
 			let records = kernel.audit.list();
 			if (req.since) {

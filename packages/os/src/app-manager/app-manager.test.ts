@@ -29,6 +29,9 @@ describe("AppManager", () => {
 		expect(manager.setState("app.todo", "resolved")).toBe("resolved");
 		expect(manager.setState("app.todo", "active")).toBe("active");
 		expect(() => manager.setState("app.todo", "installed")).toThrow("Invalid lifecycle transition");
+		expect(() => manager.setState("app.todo", "installed")).toThrowError(
+			expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>),
+		);
 	});
 
 	it("enforces quota", () => {
@@ -102,5 +105,18 @@ describe("AppManager", () => {
 				permissions: [],
 			}),
 		).toThrowError(expect.objectContaining({ code: "E_APP_NOT_REGISTERED" } satisfies Partial<OSError>));
+	});
+
+	it("returns typed validation error for invalid manifest", () => {
+		const manager = new AppManager();
+		expect(() =>
+			manager.install({
+				id: "",
+				name: "Invalid",
+				version: "1.0.0",
+				entry: "index.js",
+				permissions: [],
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>));
 	});
 });
