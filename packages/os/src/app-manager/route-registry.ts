@@ -76,7 +76,7 @@ export class AppRouteRegistry {
 			success: current.success + (input.success ? 1 : 0),
 			failure: current.failure + (input.success ? 0 : 1),
 			lastRenderedAt: new Date().toISOString(),
-			lastError: input.success ? current.lastError : input.error ?? current.lastError,
+			lastError: input.success ? undefined : input.error ?? current.lastError,
 		};
 		this.routeStats.set(route, next);
 	}
