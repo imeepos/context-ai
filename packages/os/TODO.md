@@ -13,6 +13,7 @@
 - [x] M8(架构收敛)-10: README 增加运维排障链路示例（errors -> audit trace drilldown）
 - [x] M8(架构收敛)-11: `system.errors` 增强过滤/趋势/分页（`servicePrefix`/`errorCode`/`trend`/`order+offset+recentLimit`）
 - [x] M8(架构收敛)-12: `system.errors.export` 导出接口（json/csv）接入默认服务注册
+- [x] M8(架构收敛)-13: `system.errors.export` 增强压缩与签名（`compress/signingSecret/signature`，默认注册注入 SecurityService）
 - [x] 全部规划项已落地，当前进入维护与增量迭代阶段（tests: 138 passed, build: pass）
 - [x] M7(补缺)-11: 治理状态统一快照与恢复 `system.governance.state.export/import/persist/recover`
 - [x] M6(自治运维阶段)-1: 自动修复计划 `system.alerts.auto-remediate.plan`（规则化动作编排）

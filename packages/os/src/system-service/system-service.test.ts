@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { gunzipSync } from "node:zlib";
 import { LLMOSKernel } from "../kernel/index.js";
 import { EventBus } from "../kernel/event-bus.js";
 import { NetService } from "../net-service/index.js";
@@ -439,6 +440,7 @@ describe("SystemService", () => {
 
 	it("exports errors as json and csv", async () => {
 		const kernel = new LLMOSKernel();
+		const security = new SecurityService();
 		kernel.registerService({
 			name: "err.export",
 			requiredPermissions: [],
@@ -454,9 +456,9 @@ describe("SystemService", () => {
 				workingDirectory: process.cwd(),
 			}),
 		).rejects.toThrow();
-		const service = createSystemErrorsExportService(kernel);
+		const service = createSystemErrorsExportService(kernel, security);
 		const json = await service.execute(
-			{ format: "json", servicePrefix: "err." },
+			{ format: "json", servicePrefix: "err.", signingSecret: "ek1" },
 			{
 				appId: "app.demo",
 				sessionId: "s8-export",
@@ -465,9 +467,11 @@ describe("SystemService", () => {
 			},
 		);
 		expect(json.contentType).toBe("application/json");
+		expect(json.compressed).toBe(false);
+		expect(security.verify(json.content, "ek1", json.signature)).toBe(true);
 		expect(json.content).toContain("\"totalFailures\":1");
 		const csv = await service.execute(
-			{ format: "csv", servicePrefix: "err." },
+			{ format: "csv", servicePrefix: "err.", compress: true, signingSecret: "ek1" },
 			{
 				appId: "app.demo",
 				sessionId: "s8-export",
@@ -475,9 +479,23 @@ describe("SystemService", () => {
 				workingDirectory: process.cwd(),
 			},
 		);
-		expect(csv.contentType).toBe("text/csv");
-		expect(csv.content.split("\n")[0]).toBe("timestamp,service,errorCode,error,traceId,appId,sessionId");
-		expect(csv.content).toContain("err.export");
+		expect(csv.contentType).toBe("application/gzip+base64");
+		expect(csv.compressed).toBe(true);
+		expect(security.verify(csv.content, "ek1", csv.signature)).toBe(true);
+		const decompressedCsv = gunzipSync(Buffer.from(csv.content, "base64")).toString("utf8");
+		expect(decompressedCsv.split("\n")[0]).toBe("timestamp,service,errorCode,error,traceId,appId,sessionId");
+		expect(decompressedCsv).toContain("err.export");
+		await expect(
+			service.execute(
+				{ format: "xml" as "json", servicePrefix: "err." },
+				{
+					appId: "app.demo",
+					sessionId: "s8-export",
+					permissions: ["system:read"],
+					workingDirectory: process.cwd(),
+				},
+			),
+		).rejects.toMatchObject({ code: "E_VALIDATION_FAILED" } satisfies Partial<OSError>);
 	});
 
 	it("evaluates policy decisions", async () => {

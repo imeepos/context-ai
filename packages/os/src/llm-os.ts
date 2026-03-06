@@ -395,7 +395,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 		}),
 	);
 	registerWhenEnabled("system.errors", () => createSystemErrorsService(kernel));
-	registerWhenEnabled("system.errors.export", () => createSystemErrorsExportService(kernel));
+	registerWhenEnabled("system.errors.export", () => createSystemErrorsExportService(kernel, securityService));
 
 	kernel.events.subscribe<{
 		service: string;

@@ -340,12 +340,16 @@ export interface SystemErrorsResponse {
 
 export interface SystemErrorsExportRequest extends SystemErrorsRequest {
 	format?: "json" | "csv";
+	compress?: boolean;
+	signingSecret?: string;
 }
 
 export interface SystemErrorsExportResponse {
 	format: "json" | "csv";
-	contentType: "application/json" | "text/csv";
+	contentType: "application/json" | "text/csv" | "application/gzip+base64";
 	content: string;
+	compressed: boolean;
+	signature: string;
 }
 
 export function createSystemErrorsService(
@@ -445,6 +449,7 @@ export function createSystemErrorsService(
 
 export function createSystemErrorsExportService(
 	kernel: LLMOSKernel,
+	securityService: SecurityService,
 ): OSService<SystemErrorsExportRequest, SystemErrorsExportResponse> {
 	const base = createSystemErrorsService(kernel);
 	return {
@@ -452,30 +457,53 @@ export function createSystemErrorsExportService(
 		requiredPermissions: ["system:read"],
 		execute: async (req, ctx) => {
 			const { format = "json", ...filters } = req;
+			if (format !== "json" && format !== "csv") {
+				throw new OSError("E_VALIDATION_FAILED", `Unsupported errors export format: ${format}`);
+			}
 			const response = await base.execute(filters, ctx);
+			const signingSecret = req.signingSecret ?? "errors-export-secret";
+			const payload =
+				format === "csv"
+					? [
+							"timestamp,service,errorCode,error,traceId,appId,sessionId",
+							...response.recent.map((item) =>
+								[
+									thisEscapeCsv(item.timestamp),
+									thisEscapeCsv(item.service),
+									thisEscapeCsv(item.errorCode ?? ""),
+									thisEscapeCsv(item.error ?? ""),
+									thisEscapeCsv(item.traceId ?? ""),
+									thisEscapeCsv(item.appId),
+									thisEscapeCsv(item.sessionId),
+								].join(","),
+							),
+						].join("\n")
+					: JSON.stringify(response);
+			if (req.compress) {
+				const content = gzipSync(Buffer.from(payload, "utf8")).toString("base64");
+				return {
+					format,
+					contentType: "application/gzip+base64",
+					content,
+					compressed: true,
+					signature: securityService.sign(content, signingSecret),
+				};
+			}
 			if (format === "csv") {
-				const header = "timestamp,service,errorCode,error,traceId,appId,sessionId";
-				const rows = response.recent.map((item) =>
-					[
-						thisEscapeCsv(item.timestamp),
-						thisEscapeCsv(item.service),
-						thisEscapeCsv(item.errorCode ?? ""),
-						thisEscapeCsv(item.error ?? ""),
-						thisEscapeCsv(item.traceId ?? ""),
-						thisEscapeCsv(item.appId),
-						thisEscapeCsv(item.sessionId),
-					].join(","),
-				);
 				return {
 					format: "csv",
 					contentType: "text/csv",
-					content: [header, ...rows].join("\n"),
+					content: payload,
+					compressed: false,
+					signature: securityService.sign(payload, signingSecret),
 				};
 			}
 			return {
 				format: "json",
 				contentType: "application/json",
-				content: JSON.stringify(response),
+				content: payload,
+				compressed: false,
+				signature: securityService.sign(payload, signingSecret),
 			};
 		},
 	};
