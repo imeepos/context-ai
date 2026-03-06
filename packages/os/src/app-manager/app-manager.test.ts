@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	AppManager,
+	createAppStartService,
 	createAppInstallService,
 	createAppInstallV1Service,
 	createAppPageRenderService,
@@ -196,6 +197,91 @@ describe("AppManager", () => {
 		expect(result.tools[0]?.name).toBe("todo.list");
 		const stats = manager.routes.stats("todo");
 		expect(stats[0]?.success).toBeGreaterThan(0);
+	});
+
+	it("starts app with default page when route is omitted", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		const service = createAppStartService(manager, {
+			render: async ({ appId, page }) => ({
+				prompt: `start:${appId}:${page.route}`,
+				tools: [{ name: "todo.list" }],
+			}),
+		});
+		const result = await service.execute(
+			{ appId: "todo" },
+			{
+				appId: "todo",
+				sessionId: "s-start",
+				permissions: ["app:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(result.route).toBe("todo://list");
+		expect(result.prompt).toContain("start:todo:todo://list");
+	});
+
+	it("starts app with provided route", async () => {
+		const manager = new AppManager();
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.0",
+			entry: {
+				pages: [
+					{
+						id: "list",
+						route: "todo://list",
+						name: "List",
+						description: "Show todo list",
+						path: "src/todo/list.tsx",
+						default: true,
+					},
+					{
+						id: "detail",
+						route: "todo://detail",
+						name: "Detail",
+						description: "Show todo detail",
+						path: "src/todo/detail.tsx",
+					},
+				],
+			},
+			permissions: ["app:manage", "app:read"],
+		});
+		const service = createAppStartService(manager, {
+			render: async ({ page }) => ({
+				prompt: `start:${page.route}`,
+				tools: [{ name: "todo.open" }],
+			}),
+		});
+		const result = await service.execute(
+			{ appId: "todo", route: "todo://detail" },
+			{
+				appId: "todo",
+				sessionId: "s-start-route",
+				permissions: ["app:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(result.route).toBe("todo://detail");
+		expect(result.tools[0]?.name).toBe("todo.open");
 	});
 
 	it("validates runtime tools against route app permissions", async () => {

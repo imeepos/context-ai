@@ -102,6 +102,11 @@ export interface AppManageRequest {
 	appId: string;
 }
 
+export interface AppStartRequest {
+	appId: string;
+	route?: string;
+}
+
 export interface AppListRequest {
 	readonly _: "list";
 }
@@ -341,6 +346,60 @@ export function createAppPageRenderService(
 				});
 				throw error;
 			}
+		},
+	};
+}
+
+export function createAppStartService(
+	manager: AppManager,
+	renderer: AppPageRenderer,
+): OSService<
+	AppStartRequest,
+	{
+		appId: string;
+		route: string;
+		page: AppPageEntry;
+		prompt: string;
+		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
+		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
+		metadata?: Record<string, string>;
+	}
+> {
+	return {
+		name: "app.start",
+		requiredPermissions: ["app:read"],
+		execute: async (req, ctx) => {
+			const manifest = manager.registry.get(req.appId);
+			if (!manager.isEnabled(req.appId)) {
+				throw new OSError("E_APP_NOT_REGISTERED", `App is disabled: ${req.appId}`);
+			}
+			const route = req.route ?? manifest.entry.pages.find((page) => page.default)?.route ?? manifest.entry.pages[0]?.route;
+			if (!route) {
+				throw new OSError("E_VALIDATION_FAILED", `No page route found for app: ${req.appId}`);
+			}
+			const resolved = manager.routes.resolve(route);
+			if (resolved.appId !== req.appId) {
+				throw new OSError("E_VALIDATION_FAILED", `Route ${route} does not belong to app ${req.appId}`);
+			}
+			const rendered = await renderer.render({
+				appId: resolved.appId,
+				page: resolved.page,
+				context: {
+					appId: ctx.appId,
+					sessionId: ctx.sessionId,
+					permissions: ctx.permissions,
+					workingDirectory: ctx.workingDirectory,
+				},
+			});
+			return {
+				appId: resolved.appId,
+				route,
+				page: resolved.page,
+				prompt: rendered.prompt,
+				tools: rendered.tools,
+				dataViews: rendered.dataViews,
+				metadata: rendered.metadata,
+			};
 		},
 	};
 }

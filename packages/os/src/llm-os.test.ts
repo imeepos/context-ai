@@ -122,6 +122,8 @@ describe("createDefaultLLMOS", () => {
 			expect(routes.total).toBeGreaterThan(0);
 			const routeStats = await os.kernel.execute("system.routes.stats", { appId: "app.default" }, context);
 			expect(Array.isArray(routeStats.stats)).toBe(true);
+			const startedV1 = await os.kernel.execute("app.start", { appId: "app.v1" }, context);
+			expect(startedV1.route).toBe("app.v1://main");
 
 			await os.kernel.execute("store.set", { key: "name", value: "ctp" }, context);
 			const result = await os.kernel.execute("store.get", { key: "name" }, context);
@@ -969,6 +971,8 @@ describe("createDefaultLLMOS", () => {
 			);
 			const rendered = await os.kernel.execute("app.page.render", { route: "todo://list" }, context);
 			expect(typeof rendered.prompt).toBe("string");
+			const started = await os.kernel.execute("app.start", { appId: "todo" }, context);
+			expect(started.route).toBe("todo://list");
 			const selected = await os.kernel.execute(
 				"planner.selectApps",
 				{ text: "show todo list", limit: 1 },
