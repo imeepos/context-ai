@@ -54,6 +54,14 @@ describe("PackageService", () => {
 				signature: "deadbeef",
 			}),
 		).toThrow("Invalid package signature");
+		expect(() =>
+			service.install({
+				name: "bad",
+				version: "1.0.0",
+				source: "registry://bad",
+				signature: "deadbeef",
+			}),
+		).toThrowError(expect.objectContaining({ code: "E_POLICY_DENIED" } satisfies Partial<OSError>));
 	});
 });
 

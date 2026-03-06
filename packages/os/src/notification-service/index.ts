@@ -1,4 +1,5 @@
 import type { EventBus } from "../kernel/event-bus.js";
+import { OSError } from "../kernel/errors.js";
 import type { OSService } from "../types/os.js";
 
 export type NotificationSeverity = "info" | "warning" | "error" | "critical";
@@ -407,7 +408,7 @@ export class NotificationService {
 						body: JSON.stringify(record),
 					});
 					if (!response.ok) {
-						throw new Error(`webhook status=${response.status}`);
+						throw new OSError("E_SERVICE_EXECUTION", `webhook status=${response.status}`);
 					}
 				},
 			});
@@ -425,7 +426,7 @@ export class NotificationService {
 						}),
 					});
 					if (!response.ok) {
-						throw new Error(`slack status=${response.status}`);
+						throw new OSError("E_SERVICE_EXECUTION", `slack status=${response.status}`);
 					}
 				},
 			});
@@ -446,7 +447,7 @@ export class NotificationService {
 						}),
 					});
 					if (!response.ok) {
-						throw new Error(`email status=${response.status}`);
+						throw new OSError("E_SERVICE_EXECUTION", `email status=${response.status}`);
 					}
 				},
 			});

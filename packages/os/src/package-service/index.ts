@@ -1,5 +1,6 @@
 import type { OSService } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
+import { OSError } from "../kernel/errors.js";
 
 export interface AppPackage {
 	name: string;
@@ -21,12 +22,12 @@ export class PackageService {
 	install(pkg: AppPackage): void {
 		if (this.signingSecret && this.security) {
 			if (!pkg.signature) {
-				throw new Error(`Package signature required: ${pkg.name}@${pkg.version}`);
+				throw new OSError("E_POLICY_DENIED", `Package signature required: ${pkg.name}@${pkg.version}`);
 			}
 			const payload = `${pkg.name}@${pkg.version}:${pkg.source}`;
 			const ok = this.security.verify(payload, this.signingSecret, pkg.signature);
 			if (!ok) {
-				throw new Error(`Invalid package signature: ${pkg.name}@${pkg.version}`);
+				throw new OSError("E_POLICY_DENIED", `Invalid package signature: ${pkg.name}@${pkg.version}`);
 			}
 		}
 		this.packages.set(`${pkg.name}@${pkg.version}`, pkg);

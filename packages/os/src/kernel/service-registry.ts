@@ -1,4 +1,5 @@
 import type { OSService } from "../types/os.js";
+import { OSError } from "./errors.js";
 
 export class ServiceRegistry {
 	private readonly services = new Map<string, OSService<unknown, unknown>>();
@@ -10,7 +11,7 @@ export class ServiceRegistry {
 
 		const dfs = (node: string): void => {
 			if (visiting.has(node)) {
-				throw new Error(`Service dependency cycle detected at: ${node}`);
+				throw new OSError("E_SERVICE_EXECUTION", `Service dependency cycle detected at: ${node}`);
 			}
 			if (visited.has(node)) return;
 			visiting.add(node);
@@ -28,12 +29,12 @@ export class ServiceRegistry {
 
 	register<Request, Response>(service: OSService<Request, Response>): void {
 		if (this.services.has(service.name)) {
-			throw new Error(`Service already registered: ${service.name}`);
+			throw new OSError("E_SERVICE_EXECUTION", `Service already registered: ${service.name}`);
 		}
 		const deps = service.dependencies ?? [];
 		for (const dep of deps) {
 			if (!this.services.has(dep)) {
-				throw new Error(`Service dependency missing: ${service.name} -> ${dep}`);
+				throw new OSError("E_SERVICE_EXECUTION", `Service dependency missing: ${service.name} -> ${dep}`);
 			}
 		}
 		this.services.set(service.name, service as OSService<unknown, unknown>);
@@ -45,7 +46,7 @@ export class ServiceRegistry {
 		const pending = new Map<string, OSService<unknown, unknown>>();
 		for (const service of services) {
 			if (this.services.has(service.name) || pending.has(service.name)) {
-				throw new Error(`Service already registered: ${service.name}`);
+				throw new OSError("E_SERVICE_EXECUTION", `Service already registered: ${service.name}`);
 			}
 			pending.set(service.name, service);
 		}
@@ -58,7 +59,7 @@ export class ServiceRegistry {
 				const depsResolvable = deps.every((dep) => this.services.has(dep) || pending.has(dep));
 				if (!depsResolvable) {
 					const missing = deps.find((dep) => !this.services.has(dep) && !pending.has(dep));
-					throw new Error(`Service dependency missing: ${name} -> ${missing}`);
+					throw new OSError("E_SERVICE_EXECUTION", `Service dependency missing: ${name} -> ${missing}`);
 				}
 				if (!depsSatisfied) {
 					continue;
@@ -68,7 +69,7 @@ export class ServiceRegistry {
 				progressed = true;
 			}
 			if (!progressed) {
-				throw new Error("Service dependency cycle detected in batch registration");
+				throw new OSError("E_SERVICE_EXECUTION", "Service dependency cycle detected in batch registration");
 			}
 		}
 	}
@@ -76,7 +77,7 @@ export class ServiceRegistry {
 	get<Request, Response>(name: string): OSService<Request, Response> {
 		const service = this.services.get(name);
 		if (!service) {
-			throw new Error(`Service not found: ${name}`);
+			throw new OSError("E_SERVICE_NOT_FOUND", `Service not found: ${name}`);
 		}
 		return service as OSService<Request, Response>;
 	}
@@ -122,7 +123,7 @@ export class ServiceRegistry {
 			}
 		}
 		if (order.length !== this.list().length) {
-			throw new Error("Service dependency cycle detected");
+			throw new OSError("E_SERVICE_EXECUTION", "Service dependency cycle detected");
 		}
 		return order;
 	}

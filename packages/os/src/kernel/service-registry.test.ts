@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ServiceRegistry } from "./service-registry.js";
+import { OSError } from "./errors.js";
 
 describe("ServiceRegistry", () => {
 	it("rejects registration when dependency is missing", () => {
@@ -87,5 +88,12 @@ describe("ServiceRegistry", () => {
 				},
 			]),
 		).toThrow("Service dependency cycle detected");
+	});
+
+	it("returns typed error for missing service lookup", () => {
+		const registry = new ServiceRegistry();
+		expect(() => registry.get("missing")).toThrowError(
+			expect.objectContaining({ code: "E_SERVICE_NOT_FOUND" } satisfies Partial<OSError>),
+		);
 	});
 });

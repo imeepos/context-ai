@@ -2681,7 +2681,7 @@ export function createSystemChaosRunService(
 				schedulerService.scheduleRetryable(
 					id,
 					async () => {
-						throw new Error("chaos-failure");
+						throw new OSError("E_SERVICE_EXECUTION", "chaos-failure");
 					},
 					{ maxRetries: 0, backoffMs: 1 },
 				);
@@ -2700,7 +2700,7 @@ export function createSystemChaosRunService(
 				schedulerService.scheduleRetryable(
 					id,
 					async () => {
-						throw new Error("chaos-replay-failure");
+						throw new OSError("E_SERVICE_EXECUTION", "chaos-replay-failure");
 					},
 					{ maxRetries: 0, backoffMs: 1 },
 				);
