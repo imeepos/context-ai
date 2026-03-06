@@ -279,6 +279,24 @@ describe("SystemService", () => {
 			},
 			permissions: ["app:read"],
 		});
+		manager.install({
+			id: "todo",
+			name: "Todo",
+			version: "1.0.1",
+			entry: {
+				pages: [
+					{
+						id: "detail",
+						route: "todo://detail",
+						name: "Detail",
+						description: "Show todo detail",
+						path: "src/todo/detail.tsx",
+						default: true,
+					},
+				],
+			},
+			permissions: ["app:read"],
+		});
 		const service = createSystemRoutesService(manager);
 		const response = await service.execute(
 			{ appId: "todo" },
@@ -290,6 +308,18 @@ describe("SystemService", () => {
 			},
 		);
 		expect(response.routes).toContain("todo://list");
+		expect(response.total).toBe(2);
+		const filtered = await service.execute(
+			{ appId: "todo", prefix: "todo://d", offset: 0, limit: 1 },
+			{
+				appId: "app.demo",
+				sessionId: "s6-routes",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(filtered.total).toBe(1);
+		expect(filtered.routes).toEqual(["todo://detail"]);
 	});
 
 	it("returns all capabilities map", async () => {
