@@ -1,5 +1,3 @@
-export * from './file-manager/index.js'
-export * from './bash/index.js'
 export * from './types/os.js'
 export * from './kernel/index.js'
 export * from './kernel/service-registry.js'
