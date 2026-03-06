@@ -24,6 +24,7 @@ import {
 	createSystemAppRollbackStateRecoverService,
 	createSystemAppRollbackStatsService,
 	createSystemAppRollbackGCService,
+	createSystemAppRollbackAuditService,
 	createSystemRoutesService,
 	createSystemRoutesStatsService,
 	createSystemErrorsService,
@@ -145,6 +146,41 @@ describe("SystemService", () => {
 		);
 		expect(response.records.length).toBeGreaterThan(0);
 		expect(response.records.every((record) => record.service === "demo.audit")).toBe(true);
+	});
+
+	it("returns rollback audit summary", async () => {
+		const kernel = new LLMOSKernel();
+		kernel.audit.record({
+			appId: "todo",
+			sessionId: "s-rollback",
+			traceId: "tr-1",
+			service: "app.install.rollback",
+			success: true,
+			durationMs: 10,
+		});
+		kernel.audit.record({
+			appId: "todo",
+			sessionId: "s-rollback",
+			traceId: "tr-2",
+			service: "app.install.rollback",
+			success: false,
+			durationMs: 15,
+			error: "invalid rollback token",
+			errorCode: "E_VALIDATION_FAILED",
+		});
+		const service = createSystemAppRollbackAuditService(kernel);
+		const response = await service.execute(
+			{ appId: "todo", limit: 10 },
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-audit",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(response.total).toBe(2);
+		expect(response.success).toBe(1);
+		expect(response.failure).toBe(1);
 	});
 
 	it("returns system topology", async () => {
@@ -398,6 +434,18 @@ describe("SystemService", () => {
 			},
 		);
 		expect(state.state.installReports[0]?.appId).toBe("todo");
+		expect(state.state.snapshots[0]?.token).toBeUndefined();
+		expect(typeof state.state.snapshots[0]?.tokenHash).toBe("string");
+		const sensitive = await exportService.execute(
+			{ includeSensitive: true },
+			{
+				appId: "app.demo",
+				sessionId: "s6-rollback-state",
+				permissions: ["system:read"],
+				workingDirectory: process.cwd(),
+			},
+		);
+		expect(typeof sensitive.state.snapshots[0]?.token).toBe("string");
 		const importedManager = new AppManager();
 		const importService = createSystemAppRollbackStateImportService(importedManager);
 		await importService.execute(

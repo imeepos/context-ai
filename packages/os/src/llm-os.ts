@@ -119,6 +119,7 @@ import {
 	createSystemAppRollbackStateRecoverService,
 	createSystemAppRollbackStatsService,
 	createSystemAppRollbackGCService,
+	createSystemAppRollbackAuditService,
 	createSystemErrorsService,
 	createSystemErrorsExportService,
 	createSystemErrorsKeysRotateService,
@@ -407,6 +408,7 @@ export function createDefaultLLMOS(options: CreateDefaultLLMOSOptions = {}): Def
 	);
 	registerWhenEnabled("system.app.rollback.stats", () => createSystemAppRollbackStatsService(appManager));
 	registerWhenEnabled("system.app.rollback.gc", () => createSystemAppRollbackGCService(appManager));
+	registerWhenEnabled("system.app.rollback.audit", () => createSystemAppRollbackAuditService(kernel));
 	registerWhenEnabled("system.metrics", () => createSystemMetricsService(kernel));
 	registerWhenEnabled("system.audit", () => createSystemAuditService(kernel));
 	registerWhenEnabled("system.governance.state.export", () => createSystemGovernanceStateExportService());

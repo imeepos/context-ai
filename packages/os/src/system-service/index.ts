@@ -7,6 +7,7 @@ import type { PolicyInput } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 import type { TenantQuotaGovernor } from "../kernel/resource-governor.js";
 import type { AppManager } from "../app-manager/index.js";
+import type { AppManifestV1 } from "../app-manager/manifest.js";
 import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { OSError } from "../kernel/errors.js";
@@ -156,10 +157,18 @@ export interface SystemAppDeltaResponse {
 
 export interface SystemAppRollbackState {
 	snapshots: Array<{
-		token: string;
+		token?: string;
+		tokenHash?: string;
 		appId: string;
 		createdAt: string;
 		expiresAt: string;
+		hasPrevious?: boolean;
+		hasPreviousQuota?: boolean;
+		previous?: AppManifestV1;
+		previousQuota?: {
+			maxToolCalls: number;
+			maxTokens: number;
+		};
 	}>;
 	installReports: Array<{
 		appId: string;
@@ -209,19 +218,27 @@ export function createSystemAppDeltaService(
 
 export function createSystemAppRollbackStateExportService(
 	appManager: AppManager,
-): OSService<Record<string, never>, { state: SystemAppRollbackState }> {
+): OSService<{ includeSensitive?: boolean }, { state: SystemAppRollbackState }> {
 	return {
 		name: "system.app.rollback.state.export",
 		requiredPermissions: ["system:read"],
-		execute: async () => {
+		execute: async (req) => {
 			const state = appManager.exportRollbackState();
+			const includeSensitive = req.includeSensitive === true;
 			return {
 				state: {
 					snapshots: state.snapshots.map((snapshot) => ({
-						token: snapshot.token,
+						token: includeSensitive ? snapshot.token : undefined,
+						tokenHash: includeSensitive
+							? undefined
+							: createHash("sha256").update(snapshot.token, "utf8").digest("hex"),
 						appId: snapshot.appId,
 						createdAt: snapshot.createdAt,
 						expiresAt: snapshot.expiresAt,
+						hasPrevious: includeSensitive ? undefined : !!snapshot.previous,
+						hasPreviousQuota: includeSensitive ? undefined : !!snapshot.previousQuota,
+						previous: includeSensitive ? snapshot.previous : undefined,
+						previousQuota: includeSensitive ? snapshot.previousQuota : undefined,
 					})),
 					installReports: state.installReports.map((item) => ({
 						appId: item.report.appId,
@@ -230,6 +247,64 @@ export function createSystemAppRollbackStateExportService(
 						updatedAt: item.updatedAt,
 					})),
 				},
+			};
+		},
+	};
+}
+
+export function createSystemAppRollbackAuditService(
+	kernel: LLMOSKernel,
+): OSService<
+	{
+		appId?: string;
+		sessionId?: string;
+		limit?: number;
+	},
+	{
+		total: number;
+		success: number;
+		failure: number;
+		records: Array<{
+			timestamp: string;
+			appId: string;
+			sessionId: string;
+			traceId?: string;
+			success: boolean;
+			durationMs: number;
+			error?: string;
+			errorCode?: string;
+		}>;
+	}
+> {
+	return {
+		name: "system.app.rollback.audit",
+		requiredPermissions: ["system:read"],
+		execute: async (req) => {
+			let records = kernel.audit.list().filter((item) => item.service === "app.install.rollback");
+			if (req.appId) {
+				records = records.filter((item) => item.appId === req.appId);
+			}
+			if (req.sessionId) {
+				records = records.filter((item) => item.sessionId === req.sessionId);
+			}
+			if (req.limit && req.limit > 0) {
+				records = records.slice(-req.limit);
+			}
+			const success = records.filter((item) => item.success).length;
+			return {
+				total: records.length,
+				success,
+				failure: records.length - success,
+				records: records.map((item) => ({
+					timestamp: item.timestamp,
+					appId: item.appId,
+					sessionId: item.sessionId,
+					traceId: item.traceId,
+					success: item.success,
+					durationMs: item.durationMs,
+					error: item.error,
+					errorCode: item.errorCode,
+				})),
 			};
 		},
 	};
