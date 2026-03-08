@@ -1,0 +1,58 @@
+import {
+	AppDisableOSService,
+	AppEnableOSService,
+	AppInstallOSService,
+	AppInstallRollbackOSService,
+	AppInstallV1OSService,
+	AppListOSService,
+	AppPageRenderOSService,
+	AppSetStateOSService,
+	AppStartOSService,
+	AppUninstallOSService,
+	AppUpgradeOSService,
+	RenderOSService,
+	RuntimeRiskConfirmOSService,
+	RuntimeToolsValidateOSService,
+} from "../../app-manager/index.js";
+import {
+	APP_DISABLE,
+	APP_ENABLE,
+	APP_INSTALL,
+	APP_INSTALL_ROLLBACK,
+	APP_INSTALL_V1,
+	APP_LIST,
+	APP_PAGE_RENDER,
+	APP_START,
+	APP_STATE_SET,
+	APP_UNINSTALL,
+	APP_UPGRADE,
+	RENDER,
+	RUNTIME_RISK_CONFIRM,
+	RUNTIME_TOOLS_VALIDATE,
+} from "../../tokens.js";
+import {
+	OS_APP_MANAGER,
+	OS_APP_PAGE_RENDERER,
+	OS_APP_SERVICE_HOOKS,
+	OS_ROLLBACK_HOOKS,
+	OS_SECURITY,
+	OS_SYSTEM_RUNTIME,
+} from "../tokens.js";
+import { defineInjectableOSService } from "./definition.js";
+
+export const APP_SERVICE_DEFINITIONS = [
+	defineInjectableOSService(APP_INSTALL, AppInstallOSService, [OS_APP_MANAGER, OS_APP_SERVICE_HOOKS] as const),
+	defineInjectableOSService(APP_INSTALL_ROLLBACK, AppInstallRollbackOSService, [OS_APP_MANAGER, OS_ROLLBACK_HOOKS] as const),
+	defineInjectableOSService(APP_INSTALL_V1, AppInstallV1OSService, [OS_APP_MANAGER, OS_SECURITY, OS_APP_SERVICE_HOOKS] as const),
+	defineInjectableOSService(APP_STATE_SET, AppSetStateOSService, [OS_APP_MANAGER] as const),
+	defineInjectableOSService(APP_LIST, AppListOSService, [OS_APP_MANAGER] as const),
+	defineInjectableOSService(APP_PAGE_RENDER, AppPageRenderOSService, [OS_APP_MANAGER, OS_APP_PAGE_RENDERER, OS_SYSTEM_RUNTIME] as const),
+	defineInjectableOSService(RENDER, RenderOSService, [OS_APP_MANAGER, OS_APP_PAGE_RENDERER, OS_SYSTEM_RUNTIME] as const),
+	defineInjectableOSService(APP_START, AppStartOSService, [OS_APP_MANAGER, OS_APP_PAGE_RENDERER, OS_SYSTEM_RUNTIME] as const),
+	defineInjectableOSService(RUNTIME_TOOLS_VALIDATE, RuntimeToolsValidateOSService, [OS_APP_MANAGER] as const),
+	defineInjectableOSService(RUNTIME_RISK_CONFIRM, RuntimeRiskConfirmOSService, [] as const),
+	defineInjectableOSService(APP_UPGRADE, AppUpgradeOSService, [OS_APP_MANAGER, OS_APP_SERVICE_HOOKS] as const),
+	defineInjectableOSService(APP_UNINSTALL, AppUninstallOSService, [OS_APP_MANAGER, OS_APP_SERVICE_HOOKS] as const),
+	defineInjectableOSService(APP_DISABLE, AppDisableOSService, [OS_APP_MANAGER] as const),
+	defineInjectableOSService(APP_ENABLE, AppEnableOSService, [OS_APP_MANAGER] as const),
+] as const;

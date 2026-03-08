@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { PolicyEngine } from "../kernel/policy-engine.js";
+import { createOSServiceClass } from "../os-service-class.js";
 import { FILE_EDIT, FILE_FIND, FILE_GREP, FILE_LIST, FILE_READ, FILE_WRITE } from "../tokens.js";
 import type { OSContext, OSService } from "../types/os.js";
 import { FileGuard } from "./guard.js";
@@ -124,64 +125,67 @@ export class FileService {
 	}
 }
 
+export const FileReadOSService = createOSServiceClass(FILE_READ, {
+	requiredPermissions: ["file:read"],
+	execute: async ([fileService]: [FileService], req, ctx) => ({ content: await fileService.read(req, ctx) }),
+});
+
 export function createFileReadService(fileService: FileService): OSService<FileReadRequest, { content: string }> {
-	return {
-		name: FILE_READ,
-		requiredPermissions: ["file:read"],
-		execute: async (req, ctx) => {
-			const content = await fileService.read(req, ctx);
-			return { content };
-		},
-	};
+	return new FileReadOSService(fileService);
 }
+
+export const FileWriteOSService = createOSServiceClass(FILE_WRITE, {
+	requiredPermissions: ["file:write"],
+	execute: async ([fileService]: [FileService], req, ctx) => {
+		await fileService.write(req, ctx);
+		return { ok: true as const };
+	},
+});
 
 export function createFileWriteService(fileService: FileService): OSService<FileWriteRequest, { ok: true }> {
-	return {
-		name: FILE_WRITE,
-		requiredPermissions: ["file:write"],
-		execute: async (req, ctx) => {
-			await fileService.write(req, ctx);
-			return { ok: true };
-		},
-	};
+	return new FileWriteOSService(fileService);
 }
+
+export const FileListOSService = createOSServiceClass(FILE_LIST, {
+	requiredPermissions: ["file:read"],
+	execute: async ([fileService]: [FileService], req, ctx) => ({
+		entries: await fileService.list(req, ctx),
+	}),
+});
 
 export function createFileListService(fileService: FileService): OSService<FileListRequest, { entries: string[] }> {
-	return {
-		name: FILE_LIST,
-		requiredPermissions: ["file:read"],
-		execute: async (req, ctx) => ({
-			entries: await fileService.list(req, ctx),
-		}),
-	};
+	return new FileListOSService(fileService);
 }
 
+export const FileFindOSService = createOSServiceClass(FILE_FIND, {
+	requiredPermissions: ["file:read"],
+	execute: async ([fileService]: [FileService], req, ctx) => ({
+		paths: await fileService.find(req, ctx),
+	}),
+});
+
 export function createFileFindService(fileService: FileService): OSService<FileFindRequest, { paths: string[] }> {
-	return {
-		name: FILE_FIND,
-		requiredPermissions: ["file:read"],
-		execute: async (req, ctx) => ({
-			paths: await fileService.find(req, ctx),
-		}),
-	};
+	return new FileFindOSService(fileService);
 }
+
+export const FileGrepOSService = createOSServiceClass(FILE_GREP, {
+	requiredPermissions: ["file:read"],
+	execute: async ([fileService]: [FileService], req, ctx) => ({
+		matches: await fileService.grep(req, ctx),
+	}),
+});
 
 export function createFileGrepService(
 	fileService: FileService,
 ): OSService<FileGrepRequest, { matches: Array<{ line: number; text: string }> }> {
-	return {
-		name: FILE_GREP,
-		requiredPermissions: ["file:read"],
-		execute: async (req, ctx) => ({
-			matches: await fileService.grep(req, ctx),
-		}),
-	};
+	return new FileGrepOSService(fileService);
 }
 
+export const FileEditOSService = createOSServiceClass(FILE_EDIT, {
+	requiredPermissions: ["file:write"],
+	execute: ([fileService]: [FileService], req, ctx) => fileService.edit(req, ctx),
+});
+
 export function createFileEditService(fileService: FileService): OSService<FileEditRequest, { changed: boolean }> {
-	return {
-		name: FILE_EDIT,
-		requiredPermissions: ["file:write"],
-		execute: async (req, ctx) => fileService.edit(req, ctx),
-	};
+	return new FileEditOSService(fileService);
 }

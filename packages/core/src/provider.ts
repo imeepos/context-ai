@@ -1,4 +1,4 @@
-import { InjectionTokenType } from './injector';
+import type { InjectionTokenType } from './injector';
 import { ForwardRef } from './forward-ref';
 
 /**

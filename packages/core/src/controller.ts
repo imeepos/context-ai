@@ -1,7 +1,7 @@
 import { root } from './environment-injector';
 import { InjectionToken } from './injection-token';
-import { Type } from './injector';
-import { Provider } from './provider';
+import type { Type } from './injector';
+import type { Provider } from './provider';
 export const PATH_METADATA = 'path';
 export const METHOD_METADATA = 'method';
 export enum RequestMethod {

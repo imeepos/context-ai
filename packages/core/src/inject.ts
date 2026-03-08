@@ -1,5 +1,5 @@
-import { InjectionTokenType } from './injector';
-import { InjectOptions } from './inject-options';
+import type { InjectionTokenType } from './injector';
+import type { InjectOptions } from './inject-options';
 import {
   InternalInjectFlags,
   convertInjectOptionsToFlags,

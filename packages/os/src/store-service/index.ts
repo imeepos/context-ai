@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
+import { createOSServiceClass } from "../os-service-class.js";
 import { STORE_GET, STORE_SET } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
@@ -142,23 +143,25 @@ export interface StoreGetRequest {
 	key: string;
 }
 
+export const StoreSetOSService = createOSServiceClass(STORE_SET, {
+	requiredPermissions: ["store:write"],
+	execute: ([store]: [StoreService], req) => {
+		store.set(req.key, req.value);
+		return { ok: true as const };
+	},
+});
+
 export function createStoreSetService(store: StoreService): OSService<StoreSetRequest, { ok: true }> {
-	return {
-		name: STORE_SET,
-		requiredPermissions: ["store:write"],
-		execute: async (req) => {
-			store.set(req.key, req.value);
-			return { ok: true };
-		},
-	};
+	return new StoreSetOSService(store);
 }
 
+export const StoreGetOSService = createOSServiceClass(STORE_GET, {
+	requiredPermissions: ["store:read"],
+	execute: ([store]: [StoreService], req) => ({ value: store.get(req.key) }),
+});
+
 export function createStoreGetService(store: StoreService): OSService<StoreGetRequest, { value: StoreValue | undefined }> {
-	return {
-		name: STORE_GET,
-		requiredPermissions: ["store:read"],
-		execute: async (req) => ({ value: store.get(req.key) }),
-	};
+	return new StoreGetOSService(store);
 }
 
 export type { StoreValue };

@@ -1,9 +1,11 @@
-import { Injector, InjectionTokenType, Type, isType } from './injector';
+import { Injector, isType } from './injector';
+import type { InjectionTokenType, Type } from './injector';
 import { NullInjector } from './null-injector';
-import { Provider } from './provider';
-import { getInjectableMetadata, InjectorScope } from './injectable';
+import type { Provider } from './provider';
+import { getInjectableMetadata } from './injectable';
+import type { InjectorScope } from './injectable';
 import { getInjectMetadata, getInjectOptionsMetadata } from './inject';
-import { InjectOptions } from './inject-options';
+import type { InjectOptions } from './inject-options';
 import {
   InternalInjectFlags,
   convertInjectOptionsToFlags,
@@ -15,7 +17,8 @@ import {
   resolveForwardRefsInDeps,
 } from './forward-ref';
 import { hasOnInitMetadata, isOnInit } from './on-init';
-import { APP_INITIALIZER, type Initializer } from './app-initializer';
+import { APP_INITIALIZER } from './app-initializer';
+import type { Initializer } from './app-initializer';
 import { InitializerGraph } from './initializer-graph';
 
 import { EnvironmentInjectorUtils } from './environment-injector-utils';

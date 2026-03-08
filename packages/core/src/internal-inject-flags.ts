@@ -1,4 +1,4 @@
-import { InjectOptions } from './inject-options';
+import type { InjectOptions } from './inject-options';
 
 /**
  * 内部注入标志位，使用位运算优化性能

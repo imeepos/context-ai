@@ -1,4 +1,5 @@
 import { extname } from "node:path";
+import { createOSServiceClass } from "../os-service-class.js";
 import { MEDIA_INSPECT } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
@@ -57,10 +58,11 @@ export class MediaService {
 	}
 }
 
+export const MediaInspectOSService = createOSServiceClass(MEDIA_INSPECT, {
+	requiredPermissions: ["media:read"],
+	execute: ([service]: [MediaService], req) => service.inspect(req.path),
+});
+
 export function createMediaInspectService(service: MediaService): OSService<MediaInspectRequest, MediaInspectResult> {
-	return {
-		name: MEDIA_INSPECT,
-		requiredPermissions: ["media:read"],
-		execute: async (req) => service.inspect(req.path),
-	};
+	return new MediaInspectOSService(service);
 }

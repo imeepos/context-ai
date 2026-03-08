@@ -1,5 +1,5 @@
 export interface Observable<T = any> {
-    subscribe(observer: any): any;
+    subscribe(observer: (value: T) => any): any;
 }
 export function isObservable<T = any>(obs: any): obs is Observable<T> {
     return obs && typeof obs.subscribe === 'function'

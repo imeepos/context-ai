@@ -1,3 +1,4 @@
+import { createOSServiceClass } from "../os-service-class.js";
 import { UI_RENDER } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
@@ -29,10 +30,11 @@ export class UIService {
 	}
 }
 
+export const UIRenderOSService = createOSServiceClass(UI_RENDER, {
+	requiredPermissions: ["ui:render"],
+	execute: ([service]: [UIService], req) => service.render(req),
+});
+
 export function createUIRenderService(service: UIService): OSService<UIRenderRequest, UIRenderResult> {
-	return {
-		name: UI_RENDER,
-		requiredPermissions: ["ui:render"],
-		execute: async (req) => service.render(req),
-	};
+	return new UIRenderOSService(service);
 }

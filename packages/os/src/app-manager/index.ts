@@ -6,6 +6,7 @@ import { AppQuotaManager, type AppQuota } from "./quota.js";
 import { AppRegistry } from "./registry.js";
 import { AppRouteRegistry } from "./route-registry.js";
 import { OSError } from "../kernel/errors.js";
+import { createSystemInputExecute, createSystemInputView } from "../system-runtime-bridge.js";
 import {
 	APP_DISABLE,
 	APP_ENABLE,
@@ -26,6 +27,7 @@ import type { OSService, Token } from "../types/os.js";
 import type { SecurityService } from "../security-service/index.js";
 import { randomUUID } from "node:crypto";
 import type { JSXElement } from "@context-ai/ctp";
+import { createOSServiceClass } from "../os-service-class.js";
 
 export class AppManager {
 	readonly registry = new AppRegistry();
@@ -403,6 +405,7 @@ export interface AppPageRenderContext {
 	sessionId: string;
 	permissions: string[];
 	workingDirectory: string;
+	traceId?: string;
 }
 
 export interface AppPageSystemRuntime {
@@ -433,136 +436,23 @@ function createPageSystemRuntime(
 	systemRuntime: AppPageSystemRuntime | undefined,
 	renderContext: AppPageRenderContext,
 ): AppPageRenderInput["system"] {
-	function execute<Request, Response, Name extends string>(
-		service: Token<Request, Response, Name>,
-		request: Request,
-		context?: AppPageRenderContext,
-	): Promise<Response>;
-	function execute<Request, Response>(
-		service: string,
-		request: Request,
-		context?: AppPageRenderContext,
-	): Promise<Response>;
-	function execute(service: string, request: unknown, context?: AppPageRenderContext): Promise<unknown> {
-		if (!systemRuntime) {
-			throw new OSError(
-				"E_SERVICE_NOT_FOUND",
-				`App page system runtime is not configured for service call: ${service}`,
-			);
-		}
-		return systemRuntime.execute(service, request, context ?? renderContext);
-	}
-
-	return {
-		execute,
-		services: systemRuntime?.listServices?.() ?? [],
-	};
+	return createSystemInputView(
+		createSystemInputExecute((service, request, context) => {
+			if (!systemRuntime) {
+				throw new OSError(
+					"E_SERVICE_NOT_FOUND",
+					`App page system runtime is not configured for service call: ${service}`,
+				);
+			}
+			return systemRuntime.execute(service, request, context ?? renderContext);
+		}),
+		systemRuntime?.listServices?.() ?? [],
+	);
 }
 
 export type PageResult = JSXElement | (() => JSXElement | Promise<JSXElement>);
 
 export type Page = (input: AppPageRenderInput) => PageResult | Promise<PageResult>;
-
-export function createAppInstallService(
-	manager: AppManager,
-	hooks?: AppServiceHooks,
-): OSService<AppInstallRequest, { ok: true; report: AppInstallDeltaReport }> {
-	const diffAddedRoutes = (previous: AppManifestV1 | undefined, next: AppManifestV1): number => {
-		if (!previous) return next.entry.pages.length;
-		const previousRoutes = new Set(previous.entry.pages.map((item) => item.route));
-		return next.entry.pages.filter((item) => !previousRoutes.has(item.route)).length;
-	};
-	return {
-		name: APP_INSTALL,
-		requiredPermissions: ["app:manage"],
-		execute: async (req) => {
-			const next = normalizeManifest(req.manifest);
-			const previous = manager.registry.has(next.id) ? manager.registry.get(next.id) : undefined;
-			const previousQuota = manager.quota.getQuota(next.id);
-			const addedRoutes = diffAddedRoutes(previous, next);
-			if (!req.force && addedRoutes === 0 && previous) {
-				throw new OSError("E_VALIDATION_FAILED", `No page delta for app.install: ${next.id}`);
-			}
-			manager.install(req.manifest, req.quota);
-			hooks?.onInstall?.(req.manifest);
-			const report: AppInstallDeltaReport = {
-				appId: next.id,
-				version: next.version,
-				addedPages: next.entry.pages
-					.map((page) => page.route)
-					.filter((route) => !previous?.entry.pages.some((item) => item.route === route)),
-				addedPolicies: next.permissions.filter((permission) => !previous?.permissions.includes(permission)),
-				addedObservability: [`audit:${next.id}`, `metrics:${next.id}`, `events:${next.id}`],
-				rollbackToken: `${next.id}@${next.version}:${randomUUID()}`,
-			};
-			manager.setInstallReport(report);
-			manager.setRollbackSnapshot(report.rollbackToken, {
-				appId: next.id,
-				previous,
-				previousQuota,
-			});
-			return { ok: true, report };
-		},
-	};
-}
-
-export function createAppInstallRollbackService(
-	manager: AppManager,
-	hooks?: AppServiceHooks,
-): OSService<AppInstallRollbackRequest, { ok: true; restoredVersion?: string; uninstalled: boolean }> {
-	return {
-		name: APP_INSTALL_ROLLBACK,
-		requiredPermissions: ["app:manage"],
-		execute: async (req) => {
-			const snapshot = manager.consumeRollbackSnapshot(req.rollbackToken, { appId: req.appId });
-			if (!snapshot) {
-				throw new OSError("E_VALIDATION_FAILED", `Invalid rollback token: ${req.rollbackToken}`);
-			}
-			if (snapshot.previous) {
-				manager.install(snapshot.previous);
-				manager.quota.reset(req.appId);
-				if (snapshot.previousQuota) {
-					manager.quota.setQuota(req.appId, snapshot.previousQuota);
-				}
-				manager.setInstallReport({
-					appId: snapshot.previous.id,
-					version: snapshot.previous.version,
-					addedPages: snapshot.previous.entry.pages.map((page) => page.route),
-					addedPolicies: [...snapshot.previous.permissions],
-					addedObservability: [
-						`audit:${snapshot.previous.id}`,
-						`metrics:${snapshot.previous.id}`,
-						`events:${snapshot.previous.id}`,
-					],
-					rollbackToken: req.rollbackToken,
-				}, "rollback");
-				hooks?.onInstall?.(snapshot.previous);
-				hooks?.onRollback?.({
-					appId: req.appId,
-					rollbackToken: req.rollbackToken,
-					restoredVersion: snapshot.previous.version,
-					uninstalled: false,
-				});
-				return {
-					ok: true,
-					restoredVersion: snapshot.previous.version,
-					uninstalled: false,
-				};
-			}
-			manager.uninstall(req.appId);
-			hooks?.onUninstall?.(req.appId);
-			hooks?.onRollback?.({
-				appId: req.appId,
-				rollbackToken: req.rollbackToken,
-				uninstalled: true,
-			});
-			return {
-				ok: true,
-				uninstalled: true,
-			};
-		},
-	};
-}
 
 function buildManifestSigningPayload(manifest: AppManifestV1): string {
 	const pages = [...manifest.entry.pages]
@@ -585,147 +475,314 @@ function buildManifestSigningPayload(manifest: AppManifestV1): string {
 	});
 }
 
+const diffAddedRoutes = (previous: AppManifestV1 | undefined, next: AppManifestV1): number => {
+	if (!previous) return next.entry.pages.length;
+	const previousRoutes = new Set(previous.entry.pages.map((item) => item.route));
+	return next.entry.pages.filter((item) => !previousRoutes.has(item.route)).length;
+};
+
+type RouteRenderRequest = { route: string };
+type RouteRenderResponse = {
+	appId: string;
+	page: AppPageEntry;
+	prompt: string;
+	tools: Array<{ name: string; description?: string; parameters?: unknown }>;
+	dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
+	metadata?: Record<string, string>;
+};
+type AppStartResponse = RouteRenderResponse & { route: string };
+type RuntimeToolsValidateRequest = {
+	route: string;
+	tools: Array<{
+		name: string;
+		parameters?: unknown;
+		requiredPermissions?: string[];
+	}>;
+};
+type RuntimeToolsValidateResponse = {
+	valid: boolean;
+	issues: string[];
+};
+type RuntimeRiskConfirmRequest = {
+	riskLevel: "low" | "medium" | "high";
+	approved?: boolean;
+	approver?: string;
+	approvalExpiresAt?: string;
+};
+type RuntimeRiskConfirmResponse = {
+	allowed: boolean;
+	reason?: string;
+};
+
+async function executeAppInstall(
+	manager: AppManager,
+	hooks: AppServiceHooks | undefined,
+	req: AppInstallRequest,
+): Promise<{ ok: true; report: AppInstallDeltaReport }> {
+	const next = normalizeManifest(req.manifest);
+	const previous = manager.registry.has(next.id) ? manager.registry.get(next.id) : undefined;
+	const previousQuota = manager.quota.getQuota(next.id);
+	const addedRoutes = diffAddedRoutes(previous, next);
+	if (!req.force && addedRoutes === 0 && previous) {
+		throw new OSError("E_VALIDATION_FAILED", `No page delta for app.install: ${next.id}`);
+	}
+	manager.install(req.manifest, req.quota);
+	hooks?.onInstall?.(req.manifest);
+	const report: AppInstallDeltaReport = {
+		appId: next.id,
+		version: next.version,
+		addedPages: next.entry.pages
+			.map((page) => page.route)
+			.filter((route) => !previous?.entry.pages.some((item) => item.route === route)),
+		addedPolicies: next.permissions.filter((permission) => !previous?.permissions.includes(permission)),
+		addedObservability: [`audit:${next.id}`, `metrics:${next.id}`, `events:${next.id}`],
+		rollbackToken: `${next.id}@${next.version}:${randomUUID()}`,
+	};
+	manager.setInstallReport(report);
+	manager.setRollbackSnapshot(report.rollbackToken, {
+		appId: next.id,
+		previous,
+		previousQuota,
+	});
+	return { ok: true, report };
+}
+
+export const AppInstallOSService = createOSServiceClass(APP_INSTALL, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) => executeAppInstall(manager, hooks, req),
+});
+
+export function createAppInstallService(
+	manager: AppManager,
+	hooks?: AppServiceHooks,
+): OSService<AppInstallRequest, { ok: true; report: AppInstallDeltaReport }> {
+	return new AppInstallOSService(manager, hooks);
+}
+
+async function executeAppInstallRollback(
+	manager: AppManager,
+	hooks: AppServiceHooks | undefined,
+	req: AppInstallRollbackRequest,
+): Promise<{ ok: true; restoredVersion?: string; uninstalled: boolean }> {
+	const snapshot = manager.consumeRollbackSnapshot(req.rollbackToken, { appId: req.appId });
+	if (!snapshot) {
+		throw new OSError("E_VALIDATION_FAILED", `Invalid rollback token: ${req.rollbackToken}`);
+	}
+	if (snapshot.previous) {
+		manager.install(snapshot.previous);
+		manager.quota.reset(req.appId);
+		if (snapshot.previousQuota) {
+			manager.quota.setQuota(req.appId, snapshot.previousQuota);
+		}
+		manager.setInstallReport({
+			appId: snapshot.previous.id,
+			version: snapshot.previous.version,
+			addedPages: snapshot.previous.entry.pages.map((page) => page.route),
+			addedPolicies: [...snapshot.previous.permissions],
+			addedObservability: [
+				`audit:${snapshot.previous.id}`,
+				`metrics:${snapshot.previous.id}`,
+				`events:${snapshot.previous.id}`,
+			],
+			rollbackToken: req.rollbackToken,
+		}, "rollback");
+		hooks?.onInstall?.(snapshot.previous);
+		hooks?.onRollback?.({
+			appId: req.appId,
+			rollbackToken: req.rollbackToken,
+			restoredVersion: snapshot.previous.version,
+			uninstalled: false,
+		});
+		return {
+			ok: true,
+			restoredVersion: snapshot.previous.version,
+			uninstalled: false,
+		};
+	}
+	manager.uninstall(req.appId);
+	hooks?.onUninstall?.(req.appId);
+	hooks?.onRollback?.({
+		appId: req.appId,
+		rollbackToken: req.rollbackToken,
+		uninstalled: true,
+	});
+	return {
+		ok: true,
+		uninstalled: true,
+	};
+}
+
+export const AppInstallRollbackOSService = createOSServiceClass(APP_INSTALL_ROLLBACK, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) =>
+		executeAppInstallRollback(manager, hooks, req),
+});
+
+export function createAppInstallRollbackService(
+	manager: AppManager,
+	hooks?: AppServiceHooks,
+): OSService<AppInstallRollbackRequest, { ok: true; restoredVersion?: string; uninstalled: boolean }> {
+	return new AppInstallRollbackOSService(manager, hooks);
+}
+
+async function executeAppInstallV1(
+	manager: AppManager,
+	securityService: SecurityService,
+	hooks: AppServiceHooks | undefined,
+	req: AppInstallV1Request,
+): Promise<{ ok: true; report: AppInstallDeltaReport }> {
+	if (req.requireSignature) {
+		if (!req.manifest.signing?.signature) {
+			throw new OSError("E_VALIDATION_FAILED", `Manifest signing signature is required: ${req.manifest.id}`);
+		}
+		if (!req.signingSecret) {
+			throw new OSError("E_VALIDATION_FAILED", "Signing secret is required when requireSignature=true");
+		}
+		const payload = buildManifestSigningPayload(req.manifest);
+		const verified = securityService.verify(payload, req.signingSecret, req.manifest.signing.signature);
+		if (!verified) {
+			throw new OSError("E_POLICY_DENIED", `Invalid manifest signature: ${req.manifest.id}@${req.manifest.version}`);
+		}
+	}
+	return executeAppInstall(manager, hooks, {
+		manifest: req.manifest,
+		quota: req.quota,
+		force: req.force,
+	});
+}
+
+export const AppInstallV1OSService = createOSServiceClass(APP_INSTALL_V1, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager, securityService, hooks]: [AppManager, SecurityService, AppServiceHooks | undefined], req) =>
+		executeAppInstallV1(manager, securityService, hooks, req),
+});
+
 export function createAppInstallV1Service(
 	manager: AppManager,
 	securityService: SecurityService,
 	hooks?: AppServiceHooks,
 ): OSService<AppInstallV1Request, { ok: true; report: AppInstallDeltaReport }> {
-	const baseInstall = createAppInstallService(manager, hooks);
-	return {
-		name: APP_INSTALL_V1,
-		requiredPermissions: ["app:manage"],
-		execute: async (req, ctx) => {
-			if (req.requireSignature) {
-				if (!req.manifest.signing?.signature) {
-					throw new OSError("E_VALIDATION_FAILED", `Manifest signing signature is required: ${req.manifest.id}`);
-				}
-				if (!req.signingSecret) {
-					throw new OSError("E_VALIDATION_FAILED", "Signing secret is required when requireSignature=true");
-				}
-				const payload = buildManifestSigningPayload(req.manifest);
-				const verified = securityService.verify(payload, req.signingSecret, req.manifest.signing.signature);
-				if (!verified) {
-					throw new OSError("E_POLICY_DENIED", `Invalid manifest signature: ${req.manifest.id}@${req.manifest.version}`);
-				}
-			}
-			return baseInstall.execute(
-				{
-					manifest: req.manifest,
-					quota: req.quota,
-					force: req.force,
-				},
-				ctx,
-			);
-		},
-	};
+	return new AppInstallV1OSService(manager, securityService, hooks);
 }
+
+function executeAppUpgrade(
+	manager: AppManager,
+	hooks: AppServiceHooks | undefined,
+	req: AppUpgradeRequest,
+): { ok: true } {
+	manager.upgrade(req.manifest);
+	hooks?.onUpgrade?.(req.manifest);
+	return { ok: true };
+}
+
+export const AppUpgradeOSService = createOSServiceClass(APP_UPGRADE, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) =>
+		executeAppUpgrade(manager, hooks, req),
+});
 
 export function createAppUpgradeService(
 	manager: AppManager,
 	hooks?: AppServiceHooks,
 ): OSService<AppUpgradeRequest, { ok: true }> {
-	return {
-		name: APP_UPGRADE,
-		requiredPermissions: ["app:manage"],
-		execute: async (req) => {
-			manager.upgrade(req.manifest);
-			hooks?.onUpgrade?.(req.manifest);
-			return { ok: true };
-		},
-	};
+	return new AppUpgradeOSService(manager, hooks);
 }
+
+export const AppSetStateOSService = createOSServiceClass(APP_STATE_SET, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager]: [AppManager], req) => ({
+		state: manager.setState(req.appId, req.state),
+	}),
+});
 
 export function createAppSetStateService(manager: AppManager): OSService<AppSetStateRequest, { state: AppLifecycleState }> {
-	return {
-		name: APP_STATE_SET,
-		requiredPermissions: ["app:manage"],
-		execute: async (req) => ({
-			state: manager.setState(req.appId, req.state),
-		}),
-	};
+	return new AppSetStateOSService(manager);
 }
 
+export const AppListOSService = createOSServiceClass(APP_LIST, {
+	requiredPermissions: ["app:read"],
+	execute: ([manager]: [AppManager]) => ({
+		apps: manager.registry.list(),
+	}),
+});
+
 export function createAppListService(manager: AppManager): OSService<AppListRequest, { apps: AppManifest[] }> {
-	return {
-		name: APP_LIST,
-		requiredPermissions: ["app:read"],
-		execute: async () => ({
-			apps: manager.registry.list(),
-		}),
-	};
+	return new AppListOSService(manager);
 }
+
+function executeAppUninstall(
+	manager: AppManager,
+	hooks: AppServiceHooks | undefined,
+	req: AppManageRequest,
+): { ok: true } {
+	manager.uninstall(req.appId);
+	hooks?.onUninstall?.(req.appId);
+	return { ok: true };
+}
+
+export const AppUninstallOSService = createOSServiceClass(APP_UNINSTALL, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) =>
+		executeAppUninstall(manager, hooks, req),
+});
 
 export function createAppUninstallService(
 	manager: AppManager,
 	hooks?: AppServiceHooks,
 ): OSService<AppManageRequest, { ok: true }> {
-	return {
-		name: APP_UNINSTALL,
-		requiredPermissions: ["app:manage"],
-		execute: async (req) => {
-			manager.uninstall(req.appId);
-			hooks?.onUninstall?.(req.appId);
-			return { ok: true };
-		},
-	};
+	return new AppUninstallOSService(manager, hooks);
 }
+
+export const AppDisableOSService = createOSServiceClass(APP_DISABLE, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager]: [AppManager], req) => {
+		manager.disable(req.appId);
+		return { ok: true as const };
+	},
+});
 
 export function createAppDisableService(manager: AppManager): OSService<AppManageRequest, { ok: true }> {
-	return {
-		name: APP_DISABLE,
-		requiredPermissions: ["app:manage"],
-		execute: async (req) => {
-			manager.disable(req.appId);
-			return { ok: true };
-		},
-	};
+	return new AppDisableOSService(manager);
 }
 
+export const AppEnableOSService = createOSServiceClass(APP_ENABLE, {
+	requiredPermissions: ["app:manage"],
+	execute: ([manager]: [AppManager], req) => {
+		manager.enable(req.appId);
+		return { ok: true as const };
+	},
+});
+
 export function createAppEnableService(manager: AppManager): OSService<AppManageRequest, { ok: true }> {
-	return {
-		name: APP_ENABLE,
-		requiredPermissions: ["app:manage"],
-		execute: async (req) => {
-			manager.enable(req.appId);
-			return { ok: true };
-		},
-	};
+	return new AppEnableOSService(manager);
 }
+
+export const AppPageRenderOSService = createOSServiceClass(APP_PAGE_RENDER, {
+	requiredPermissions: ["app:read"],
+	execute: ([manager, renderer, systemRuntime]: [AppManager, AppPageRenderer, AppPageSystemRuntime | undefined], req, ctx) =>
+		createRouteRenderService(APP_PAGE_RENDER, manager, renderer, systemRuntime).execute(req, ctx),
+});
 
 export function createAppPageRenderService(
 	manager: AppManager,
 	renderer: AppPageRenderer,
 	systemRuntime?: AppPageSystemRuntime,
-): OSService<
-	{ route: string },
-	{
-		appId: string;
-		page: AppPageEntry;
-		prompt: string;
-		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
-		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
-		metadata?: Record<string, string>;
-	}
-> {
-	return createRouteRenderService(APP_PAGE_RENDER, manager, renderer, systemRuntime);
+): OSService<RouteRenderRequest, RouteRenderResponse> {
+	return new AppPageRenderOSService(manager, renderer, systemRuntime);
 }
+
+export const RenderOSService = createOSServiceClass(RENDER, {
+	requiredPermissions: ["app:read"],
+	execute: ([manager, renderer, systemRuntime]: [AppManager, AppPageRenderer, AppPageSystemRuntime | undefined], req, ctx) =>
+		createRouteRenderService(RENDER, manager, renderer, systemRuntime).execute(req, ctx),
+});
 
 export function createRenderService(
 	manager: AppManager,
 	renderer: AppPageRenderer,
 	systemRuntime?: AppPageSystemRuntime,
-): OSService<
-	{ route: string },
-	{
-		appId: string;
-		page: AppPageEntry;
-		prompt: string;
-		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
-		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
-		metadata?: Record<string, string>;
-	}
-> {
-	return createRouteRenderService(RENDER, manager, renderer, systemRuntime);
+): OSService<RouteRenderRequest, RouteRenderResponse> {
+	return new RenderOSService(manager, renderer, systemRuntime);
 }
 
 function createRouteRenderService(
@@ -733,17 +790,7 @@ function createRouteRenderService(
 	manager: AppManager,
 	renderer: AppPageRenderer,
 	systemRuntime?: AppPageSystemRuntime,
-): OSService<
-	{ route: string },
-	{
-		appId: string;
-		page: AppPageEntry;
-		prompt: string;
-		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
-		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
-		metadata?: Record<string, string>;
-	}
-> {
+): OSService<RouteRenderRequest, RouteRenderResponse> {
 	return {
 		name,
 		requiredPermissions: ["app:read"],
@@ -762,6 +809,7 @@ function createRouteRenderService(
 					sessionId: ctx.sessionId,
 					permissions: ctx.permissions,
 					workingDirectory: ctx.workingDirectory,
+					traceId: ctx.traceId,
 				};
 				const rendered = await renderer.render({
 					appId: resolved.appId,
@@ -789,71 +837,71 @@ function createRouteRenderService(
 	};
 }
 
+async function executeAppStart(
+	manager: AppManager,
+	renderer: AppPageRenderer,
+	systemRuntime: AppPageSystemRuntime | undefined,
+	req: AppStartRequest,
+	ctx: AppPageRenderContext,
+): Promise<AppStartResponse> {
+	const manifest = manager.registry.get(req.appId);
+	if (!manager.isEnabled(req.appId)) {
+		throw new OSError("E_APP_NOT_REGISTERED", `App is disabled: ${req.appId}`);
+	}
+	const route = req.route ?? manifest.entry.pages.find((page) => page.default)?.route ?? manifest.entry.pages[0]?.route;
+	if (!route) {
+		throw new OSError("E_VALIDATION_FAILED", `No page route found for app: ${req.appId}`);
+	}
+	const resolved = manager.routes.resolve(route);
+	if (resolved.appId !== req.appId) {
+		throw new OSError("E_VALIDATION_FAILED", `Route ${route} does not belong to app ${req.appId}`);
+	}
+	try {
+		const renderContext: AppPageRenderContext = {
+			appId: resolved.appId,
+			sessionId: ctx.sessionId,
+			permissions: ctx.permissions,
+			workingDirectory: ctx.workingDirectory,
+			traceId: ctx.traceId,
+		};
+		const rendered = await renderer.render({
+			appId: resolved.appId,
+			page: resolved.page,
+			context: renderContext,
+			system: createPageSystemRuntime(systemRuntime, renderContext),
+		});
+		ensureRunningState(manager, req.appId);
+		manager.routes.recordRender(route, { success: true });
+		return {
+			appId: resolved.appId,
+			route,
+			page: resolved.page,
+			prompt: rendered.prompt,
+			tools: rendered.tools,
+			dataViews: rendered.dataViews,
+			metadata: rendered.metadata,
+		};
+	} catch (error) {
+		manager.routes.recordRender(route, {
+			success: false,
+			error: error instanceof Error ? error.message : String(error),
+		});
+		throw error;
+	}
+}
+
+export const AppStartOSService = createOSServiceClass(APP_START, {
+	requiredPermissions: ["app:read"],
+	execute: ([manager, renderer, systemRuntime]: [AppManager, AppPageRenderer, AppPageSystemRuntime | undefined], req, ctx) =>
+		executeAppStart(manager, renderer, systemRuntime, req, ctx),
+});
+
 export function createAppStartService(
 	manager: AppManager,
 	renderer: AppPageRenderer,
 	systemRuntime?: AppPageSystemRuntime,
-): OSService<
-	AppStartRequest,
-	{
-		appId: string;
-		route: string;
-		page: AppPageEntry;
-		prompt: string;
-		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
-		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
-		metadata?: Record<string, string>;
-	}
-> {
-	return {
-		name: APP_START,
-		requiredPermissions: ["app:read"],
-		execute: async (req, ctx) => {
-			const manifest = manager.registry.get(req.appId);
-			if (!manager.isEnabled(req.appId)) {
-				throw new OSError("E_APP_NOT_REGISTERED", `App is disabled: ${req.appId}`);
-			}
-			const route = req.route ?? manifest.entry.pages.find((page) => page.default)?.route ?? manifest.entry.pages[0]?.route;
-			if (!route) {
-				throw new OSError("E_VALIDATION_FAILED", `No page route found for app: ${req.appId}`);
-			}
-			const resolved = manager.routes.resolve(route);
-			if (resolved.appId !== req.appId) {
-				throw new OSError("E_VALIDATION_FAILED", `Route ${route} does not belong to app ${req.appId}`);
-			}
-			try {
-				const renderContext: AppPageRenderContext = {
-					appId: resolved.appId,
-					sessionId: ctx.sessionId,
-					permissions: ctx.permissions,
-					workingDirectory: ctx.workingDirectory,
-				};
-				const rendered = await renderer.render({
-					appId: resolved.appId,
-					page: resolved.page,
-					context: renderContext,
-					system: createPageSystemRuntime(systemRuntime, renderContext),
-				});
-				ensureRunningState(manager, req.appId);
-				manager.routes.recordRender(route, { success: true });
-				return {
-					appId: resolved.appId,
-					route,
-					page: resolved.page,
-					prompt: rendered.prompt,
-					tools: rendered.tools,
-					dataViews: rendered.dataViews,
-					metadata: rendered.metadata,
-				};
-			} catch (error) {
-				manager.routes.recordRender(route, {
-					success: false,
-					error: error instanceof Error ? error.message : String(error),
-				});
-				throw error;
-			}
-		},
-	};
+): OSService<AppStartRequest, AppStartResponse> {
+	return new AppStartOSService(manager, renderer, systemRuntime);
 }
 
 function ensureRunningState(manager: AppManager, appId: string): void {
@@ -874,97 +922,82 @@ function ensureRunningState(manager: AppManager, appId: string): void {
 	}
 }
 
-export function createRuntimeToolsValidateService(
+function validateRuntimeTools(
 	manager: AppManager,
-): OSService<
-	{
-		route: string;
-		tools: Array<{
-			name: string;
-			parameters?: unknown;
-			requiredPermissions?: string[];
-		}>;
-	},
-	{
-		valid: boolean;
-		issues: string[];
-	}
-> {
-	return {
-		name: RUNTIME_TOOLS_VALIDATE,
-		requiredPermissions: ["app:read"],
-		execute: async (req) => {
-			const resolved = manager.routes.resolve(req.route);
-			const manifest = manager.registry.get(resolved.appId);
-			const grantedPermissions = new Set(manifest.permissions);
-			const issues: string[] = [];
-			const seen = new Set<string>();
-			for (const tool of req.tools) {
-				if (!tool.name?.trim()) {
-					issues.push("tool.name is required");
-				} else if (seen.has(tool.name)) {
-					issues.push(`duplicate tool name: ${tool.name}`);
-				} else {
-					seen.add(tool.name);
-				}
-				if (tool.parameters !== undefined) {
-					const isObjectSchema =
-						typeof tool.parameters === "object" && tool.parameters !== null && !Array.isArray(tool.parameters);
-					if (!isObjectSchema) {
-						issues.push(`invalid parameters schema: ${tool.name || "unknown"}`);
-					}
-				}
-				for (const permission of tool.requiredPermissions ?? []) {
-					if (!grantedPermissions.has(permission)) {
-						issues.push(`permission mismatch: ${tool.name || "unknown"} requires ${permission}`);
-					}
-				}
+	req: RuntimeToolsValidateRequest,
+): RuntimeToolsValidateResponse {
+	const resolved = manager.routes.resolve(req.route);
+	const manifest = manager.registry.get(resolved.appId);
+	const grantedPermissions = new Set(manifest.permissions);
+	const issues: string[] = [];
+	const seen = new Set<string>();
+	for (const tool of req.tools) {
+		if (!tool.name?.trim()) {
+			issues.push("tool.name is required");
+		} else if (seen.has(tool.name)) {
+			issues.push(`duplicate tool name: ${tool.name}`);
+		} else {
+			seen.add(tool.name);
+		}
+		if (tool.parameters !== undefined) {
+			const isObjectSchema =
+				typeof tool.parameters === "object" && tool.parameters !== null && !Array.isArray(tool.parameters);
+			if (!isObjectSchema) {
+				issues.push(`invalid parameters schema: ${tool.name || "unknown"}`);
 			}
-			return {
-				valid: issues.length === 0,
-				issues,
-			};
-		},
+		}
+		for (const permission of tool.requiredPermissions ?? []) {
+			if (!grantedPermissions.has(permission)) {
+				issues.push(`permission mismatch: ${tool.name || "unknown"} requires ${permission}`);
+			}
+		}
+	}
+	return {
+		valid: issues.length === 0,
+		issues,
 	};
 }
 
-export function createRuntimeRiskConfirmService(): OSService<
-	{
-		riskLevel: "low" | "medium" | "high";
-		approved?: boolean;
-		approver?: string;
-		approvalExpiresAt?: string;
-	},
-	{
-		allowed: boolean;
-		reason?: string;
+export const RuntimeToolsValidateOSService = createOSServiceClass(RUNTIME_TOOLS_VALIDATE, {
+	requiredPermissions: ["app:read"],
+	execute: ([manager]: [AppManager], req) => validateRuntimeTools(manager, req),
+});
+
+export function createRuntimeToolsValidateService(
+	manager: AppManager,
+): OSService<RuntimeToolsValidateRequest, RuntimeToolsValidateResponse> {
+	return new RuntimeToolsValidateOSService(manager);
+}
+
+function confirmRuntimeRisk(req: RuntimeRiskConfirmRequest): RuntimeRiskConfirmResponse {
+	if (req.riskLevel === "low") {
+		return { allowed: true };
 	}
-> {
-	return {
-		name: RUNTIME_RISK_CONFIRM,
-		requiredPermissions: ["app:read"],
-		execute: async (req) => {
-			if (req.riskLevel === "low") {
-				return { allowed: true };
-			}
-			if (!req.approved) {
-				return { allowed: false, reason: "approval_required" };
-			}
-			if (!req.approver?.trim()) {
-				return { allowed: false, reason: "approver_required" };
-			}
-			if (req.riskLevel === "high") {
-				if (!req.approvalExpiresAt) {
-					return { allowed: false, reason: "approval_expires_at_required" };
-				}
-				const expires = Date.parse(req.approvalExpiresAt);
-				if (Number.isNaN(expires) || expires <= Date.now()) {
-					return { allowed: false, reason: "approval_expired" };
-				}
-			}
-			return { allowed: true };
-		},
-	};
+	if (!req.approved) {
+		return { allowed: false, reason: "approval_required" };
+	}
+	if (!req.approver?.trim()) {
+		return { allowed: false, reason: "approver_required" };
+	}
+	if (req.riskLevel === "high") {
+		if (!req.approvalExpiresAt) {
+			return { allowed: false, reason: "approval_expires_at_required" };
+		}
+		const expires = Date.parse(req.approvalExpiresAt);
+		if (Number.isNaN(expires) || expires <= Date.now()) {
+			return { allowed: false, reason: "approval_expired" };
+		}
+	}
+	return { allowed: true };
+}
+
+export const RuntimeRiskConfirmOSService = createOSServiceClass(RUNTIME_RISK_CONFIRM, {
+	requiredPermissions: ["app:read"],
+	execute: (_dependencies: [], req) => confirmRuntimeRisk(req),
+});
+
+export function createRuntimeRiskConfirmService(): OSService<RuntimeRiskConfirmRequest, RuntimeRiskConfirmResponse> {
+	return new RuntimeRiskConfirmOSService();
 }
 
 export type { AppManifest } from "./manifest.js";

@@ -1,11 +1,13 @@
-import type { AppManager, AppPageRenderContext, AppPageRenderInput, AppPageRenderer } from "../app-manager/index.js";
+import type { AppManager, AppPageRenderInput, AppPageRenderer } from "../app-manager/index.js";
 import type { ModelService } from "../model-service/index.js";
+import { createOSServiceClass } from "../os-service-class.js";
+import { createSystemInputExecute, createSystemInputView } from "../system-runtime-bridge.js";
 import {
 	PLANNER_COMPOSE_TOOLS,
 	PLANNER_SELECT_APPS,
 	RUNNER_EXECUTE_PLAN,
 } from "../tokens.js";
-import type { OSService, Token } from "../types/os.js";
+import type { OSService } from "../types/os.js";
 
 export interface PlannerSelectAppsRequest {
 	text: string;
@@ -68,24 +70,12 @@ export interface RunnerExecutePlanResponse {
 }
 
 function createFallbackSystemRuntime(): AppPageRenderInput["system"] {
-	function execute<Request, Response, Name extends string>(
-		service: Token<Request, Response, Name>,
-		_request: Request,
-		_context?: AppPageRenderContext,
-	): Promise<Response>;
-	function execute<Request, Response>(
-		service: string,
-		_request: Request,
-		_context?: AppPageRenderContext,
-	): Promise<Response>;
-	function execute(service: string): Promise<never> {
-		throw new Error(`System runtime is unavailable in planner renderer context: ${service}`);
-	}
-
-	return {
-		execute,
-		services: [],
-	};
+	return createSystemInputView(
+		createSystemInputExecute((service) => {
+			throw new Error(`System runtime is unavailable in planner renderer context: ${service}`);
+		}),
+		[],
+	);
 }
 
 function scoreApp(text: string, app: ReturnType<AppManager["registry"]["list"]>[number]): { score: number; reason: string } {
@@ -115,68 +105,183 @@ function scoreApp(text: string, app: ReturnType<AppManager["registry"]["list"]>[
 	return { score, reason: hits.length > 0 ? hits.join(", ") : "fallback ranking" };
 }
 
+export const PlannerSelectAppsOSService = createOSServiceClass(PLANNER_SELECT_APPS, {
+	requiredPermissions: ["app:read"],
+	execute: ([appManager]: [AppManager], req) => {
+		const limit = req.limit && req.limit > 0 ? req.limit : 3;
+		const ranked = appManager.registry
+			.list()
+			.map((app) => {
+				const scored = scoreApp(req.text, app);
+				return {
+					appId: app.id,
+					score: scored.score,
+					routes: app.entry.pages.map((item) => item.route),
+					reason: scored.reason,
+				};
+			})
+			.sort((a, b) => b.score - a.score || a.appId.localeCompare(b.appId))
+			.slice(0, limit);
+		return {
+			selected: ranked,
+		};
+	},
+});
+
+export const PlannerComposeToolsOSService = createOSServiceClass(PLANNER_COMPOSE_TOOLS, {
+	requiredPermissions: ["app:read"],
+	execute: async ([appManager, pageRenderer]: [AppManager, AppPageRenderer], req, ctx) => {
+		const composed: PlannerComposeToolsResponse["composed"] = [];
+		let toolCount = 0;
+		for (const route of req.routes) {
+			const resolved = appManager.routes.resolve(route);
+			const rendered = await pageRenderer.render({
+				appId: resolved.appId,
+				page: resolved.page,
+				context: {
+					appId: ctx.appId,
+					sessionId: ctx.sessionId,
+					permissions: ctx.permissions,
+					workingDirectory: ctx.workingDirectory,
+					traceId: ctx.traceId,
+				},
+				system: createFallbackSystemRuntime(),
+			});
+			toolCount += rendered.tools.length;
+			composed.push({
+				route,
+				appId: resolved.appId,
+				prompt: rendered.prompt,
+				tools: rendered.tools,
+			});
+		}
+		return { composed, toolCount };
+	},
+});
+
+export const RunnerExecutePlanOSService = createOSServiceClass(RUNNER_EXECUTE_PLAN, {
+	requiredPermissions: ["app:read", "model:invoke"],
+	execute: async ([appManager, pageRenderer, modelService]: [AppManager, AppPageRenderer, ModelService], req, ctx) => {
+		if (req.risk && req.risk.level !== "low") {
+			if (!req.risk.approved || !req.risk.approver?.trim()) {
+				throw new Error("E_POLICY_DENIED: execution approval required");
+			}
+			if (req.risk.level === "high") {
+				const expiresAt = req.risk.approvalExpiresAt ? Date.parse(req.risk.approvalExpiresAt) : Number.NaN;
+				if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) {
+					throw new Error("E_POLICY_DENIED: execution approval expired");
+				}
+			}
+		}
+		const maxSteps = req.maxSteps && req.maxSteps > 0 ? req.maxSteps : req.routes.length;
+		const stopCondition = req.stopCondition ?? "DONE";
+		const model = req.model ?? "echo";
+		const maxRetries = req.maxRetries && req.maxRetries > 0 ? req.maxRetries : 0;
+		const results: RunnerExecutePlanResponse["results"] = [];
+		const failures: RunnerExecutePlanResponse["failures"] = [];
+		let steps = 0;
+		let terminatedBy: RunnerExecutePlanResponse["terminatedBy"] = "max_steps";
+		for (const route of req.routes) {
+			if (steps >= maxSteps) {
+				terminatedBy = "max_steps";
+				break;
+			}
+			let retried = 0;
+			let output: string | undefined;
+			while (retried <= maxRetries) {
+				try {
+					const resolved = appManager.routes.resolve(route);
+					const rendered = await pageRenderer.render({
+						appId: resolved.appId,
+						page: resolved.page,
+						context: {
+							appId: ctx.appId,
+							sessionId: ctx.sessionId,
+							permissions: ctx.permissions,
+							workingDirectory: ctx.workingDirectory,
+							traceId: ctx.traceId,
+						},
+						system: createFallbackSystemRuntime(),
+					});
+					const prompt = `${rendered.prompt}\n\nTask Goal:\n${req.text}\nRoute:${route}\nTools:${rendered.tools
+						.map((tool) => tool.name)
+						.join(",")}`;
+					const generated = await modelService.generate({
+						model,
+						prompt,
+					});
+					output = generated.output;
+					break;
+				} catch (error) {
+					retried += 1;
+					if (retried > maxRetries) {
+						const message = error instanceof Error ? error.message : String(error);
+						failures.push({
+							route,
+							error: message,
+							retried: maxRetries,
+						});
+						if (req.fallbackRoute) {
+							const fallbackResolved = appManager.routes.resolve(req.fallbackRoute);
+							const fallbackRendered = await pageRenderer.render({
+								appId: fallbackResolved.appId,
+								page: fallbackResolved.page,
+								context: {
+									appId: ctx.appId,
+									sessionId: ctx.sessionId,
+									permissions: ctx.permissions,
+									workingDirectory: ctx.workingDirectory,
+									traceId: ctx.traceId,
+								},
+								system: createFallbackSystemRuntime(),
+							});
+							const fallbackPrompt = `${fallbackRendered.prompt}\n\nTask Goal:\n${req.text}\nRoute:${req.fallbackRoute}\nTools:${fallbackRendered.tools
+								.map((tool) => tool.name)
+								.join(",")}`;
+							const fallback = await modelService.generate({
+								model,
+								prompt: fallbackPrompt,
+							});
+							results.push({
+								route: req.fallbackRoute,
+								output: fallback.output,
+								recovered: true,
+							});
+						}
+					}
+				}
+			}
+			if (output !== undefined) {
+				results.push({ route, output });
+			}
+			steps += 1;
+			const latest = results.at(-1)?.output;
+			if (latest && latest.includes(stopCondition)) {
+				terminatedBy = "stop_condition";
+				break;
+			}
+		}
+		return {
+			terminatedBy,
+			steps,
+			results,
+			failures,
+			summary: `runner.executePlan finished by ${terminatedBy} in ${steps} step(s)`,
+		};
+	},
+});
+
 export function createPlannerSelectAppsService(
 	appManager: AppManager,
 ): OSService<PlannerSelectAppsRequest, PlannerSelectAppsResponse> {
-	return {
-		name: PLANNER_SELECT_APPS,
-		requiredPermissions: ["app:read"],
-		execute: async (req) => {
-			const limit = req.limit && req.limit > 0 ? req.limit : 3;
-			const ranked = appManager.registry
-				.list()
-				.map((app) => {
-					const scored = scoreApp(req.text, app);
-					return {
-						appId: app.id,
-						score: scored.score,
-						routes: app.entry.pages.map((item) => item.route),
-						reason: scored.reason,
-					};
-				})
-				.sort((a, b) => b.score - a.score || a.appId.localeCompare(b.appId))
-				.slice(0, limit);
-			return {
-				selected: ranked,
-			};
-		},
-	};
+	return new PlannerSelectAppsOSService(appManager);
 }
 
 export function createPlannerComposeToolsService(
 	appManager: AppManager,
 	pageRenderer: AppPageRenderer,
 ): OSService<PlannerComposeToolsRequest, PlannerComposeToolsResponse> {
-	return {
-		name: PLANNER_COMPOSE_TOOLS,
-		requiredPermissions: ["app:read"],
-		execute: async (req, ctx) => {
-			const composed: PlannerComposeToolsResponse["composed"] = [];
-			let toolCount = 0;
-			for (const route of req.routes) {
-				const resolved = appManager.routes.resolve(route);
-				const rendered = await pageRenderer.render({
-					appId: resolved.appId,
-					page: resolved.page,
-					context: {
-						appId: ctx.appId,
-						sessionId: ctx.sessionId,
-						permissions: ctx.permissions,
-						workingDirectory: ctx.workingDirectory,
-					},
-					system: createFallbackSystemRuntime(),
-				});
-				toolCount += rendered.tools.length;
-				composed.push({
-					route,
-					appId: resolved.appId,
-					prompt: rendered.prompt,
-					tools: rendered.tools,
-				});
-			}
-			return { composed, toolCount };
-		},
-	};
+	return new PlannerComposeToolsOSService(appManager, pageRenderer);
 }
 
 export function createRunnerExecutePlanService(
@@ -184,114 +289,5 @@ export function createRunnerExecutePlanService(
 	pageRenderer: AppPageRenderer,
 	modelService: ModelService,
 ): OSService<RunnerExecutePlanRequest, RunnerExecutePlanResponse> {
-	return {
-		name: RUNNER_EXECUTE_PLAN,
-		requiredPermissions: ["app:read", "model:invoke"],
-		execute: async (req, ctx) => {
-			if (req.risk && req.risk.level !== "low") {
-				if (!req.risk.approved || !req.risk.approver?.trim()) {
-					throw new Error("E_POLICY_DENIED: execution approval required");
-				}
-				if (req.risk.level === "high") {
-					const expiresAt = req.risk.approvalExpiresAt ? Date.parse(req.risk.approvalExpiresAt) : Number.NaN;
-					if (Number.isNaN(expiresAt) || expiresAt <= Date.now()) {
-						throw new Error("E_POLICY_DENIED: execution approval expired");
-					}
-				}
-			}
-			const maxSteps = req.maxSteps && req.maxSteps > 0 ? req.maxSteps : req.routes.length;
-			const stopCondition = req.stopCondition ?? "DONE";
-			const model = req.model ?? "echo";
-			const maxRetries = req.maxRetries && req.maxRetries > 0 ? req.maxRetries : 0;
-			const results: RunnerExecutePlanResponse["results"] = [];
-			const failures: RunnerExecutePlanResponse["failures"] = [];
-			let steps = 0;
-			let terminatedBy: RunnerExecutePlanResponse["terminatedBy"] = "max_steps";
-			for (const route of req.routes) {
-				if (steps >= maxSteps) {
-					terminatedBy = "max_steps";
-					break;
-				}
-				let retried = 0;
-				let output: string | undefined;
-				while (retried <= maxRetries) {
-					try {
-						const resolved = appManager.routes.resolve(route);
-						const rendered = await pageRenderer.render({
-							appId: resolved.appId,
-							page: resolved.page,
-							context: {
-								appId: ctx.appId,
-								sessionId: ctx.sessionId,
-								permissions: ctx.permissions,
-								workingDirectory: ctx.workingDirectory,
-							},
-							system: createFallbackSystemRuntime(),
-						});
-						const prompt = `${rendered.prompt}\n\nTask Goal:\n${req.text}\nRoute:${route}\nTools:${rendered.tools
-							.map((tool) => tool.name)
-							.join(",")}`;
-						const generated = await modelService.generate({
-							model,
-							prompt,
-						});
-						output = generated.output;
-						break;
-					} catch (error) {
-						retried += 1;
-						if (retried > maxRetries) {
-							const message = error instanceof Error ? error.message : String(error);
-							failures.push({
-								route,
-								error: message,
-								retried: maxRetries,
-							});
-							if (req.fallbackRoute) {
-								const fallbackResolved = appManager.routes.resolve(req.fallbackRoute);
-								const fallbackRendered = await pageRenderer.render({
-									appId: fallbackResolved.appId,
-									page: fallbackResolved.page,
-									context: {
-										appId: ctx.appId,
-										sessionId: ctx.sessionId,
-										permissions: ctx.permissions,
-										workingDirectory: ctx.workingDirectory,
-									},
-									system: createFallbackSystemRuntime(),
-								});
-								const fallbackPrompt = `${fallbackRendered.prompt}\n\nTask Goal:\n${req.text}\nRoute:${req.fallbackRoute}\nTools:${fallbackRendered.tools
-									.map((tool) => tool.name)
-									.join(",")}`;
-								const fallback = await modelService.generate({
-									model,
-									prompt: fallbackPrompt,
-								});
-								results.push({
-									route: req.fallbackRoute,
-									output: fallback.output,
-									recovered: true,
-								});
-							}
-						}
-					}
-				}
-				if (output !== undefined) {
-					results.push({ route, output });
-				}
-				steps += 1;
-				const latest = results.at(-1)?.output;
-				if (latest && latest.includes(stopCondition)) {
-					terminatedBy = "stop_condition";
-					break;
-				}
-			}
-			return {
-				terminatedBy,
-				steps,
-				results,
-				failures,
-				summary: `runner.executePlan finished by ${terminatedBy} in ${steps} step(s)`,
-			};
-		},
-	};
+	return new RunnerExecutePlanOSService(appManager, pageRenderer, modelService);
 }

@@ -1,4 +1,5 @@
 import { OSError } from "../kernel/errors.js";
+import { createOSServiceClass } from "../os-service-class.js";
 import {
 	SCHEDULER_CANCEL,
 	SCHEDULER_FAILURES_CLEAR,
@@ -404,61 +405,74 @@ export interface ReplaySchedulerFailureRequest {
 	id: string;
 }
 
+export const SchedulerCancelOSService = createOSServiceClass(SCHEDULER_CANCEL, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService], req) => ({ cancelled: scheduler.cancel(req.id) }),
+});
+
 export function createSchedulerCancelService(scheduler: SchedulerService): OSService<CancelTaskRequest, { cancelled: boolean }> {
-	return {
-		name: SCHEDULER_CANCEL,
-		requiredPermissions: ["scheduler:write"],
-		execute: async (req) => ({ cancelled: scheduler.cancel(req.id) }),
-	};
+	return new SchedulerCancelOSService(scheduler);
 }
+
+export const SchedulerListOSService = createOSServiceClass(SCHEDULER_LIST, {
+	requiredPermissions: ["scheduler:read"],
+	execute: ([scheduler]: [SchedulerService]) => ({ taskIds: scheduler.list() }),
+});
 
 export function createSchedulerListService(
 	scheduler: SchedulerService,
 ): OSService<ListTasksRequest, { taskIds: string[] }> {
-	return {
-		name: SCHEDULER_LIST,
-		requiredPermissions: ["scheduler:read"],
-		execute: async () => ({ taskIds: scheduler.list() }),
-	};
+	return new SchedulerListOSService(scheduler);
 }
+
+export const SchedulerScheduleOnceOSService = createOSServiceClass(SCHEDULER_SCHEDULE_ONCE, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService], req) => {
+		scheduler.scheduleEventOnce(req.id, req.delayMs, req.topic, req.payload);
+		return { scheduled: true as const };
+	},
+});
 
 export function createSchedulerScheduleOnceService(
 	scheduler: SchedulerService,
 ): OSService<ScheduleOnceRequest, { scheduled: true }> {
-	return {
-		name: SCHEDULER_SCHEDULE_ONCE,
-		requiredPermissions: ["scheduler:write"],
-		execute: async (req) => {
-			scheduler.scheduleEventOnce(req.id, req.delayMs, req.topic, req.payload);
-			return { scheduled: true };
-		},
-	};
+	return new SchedulerScheduleOnceOSService(scheduler);
 }
+
+export const SchedulerScheduleIntervalOSService = createOSServiceClass(SCHEDULER_SCHEDULE_INTERVAL, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService], req) => {
+		scheduler.scheduleEventInterval(req.id, req.intervalMs, req.topic, req.payload, {
+			maxRuns: req.maxRuns,
+		});
+		return { scheduled: true as const };
+	},
+});
 
 export function createSchedulerScheduleIntervalService(
 	scheduler: SchedulerService,
 ): OSService<ScheduleIntervalRequest, { scheduled: true }> {
-	return {
-		name: SCHEDULER_SCHEDULE_INTERVAL,
-		requiredPermissions: ["scheduler:write"],
-		execute: async (req) => {
-			scheduler.scheduleEventInterval(req.id, req.intervalMs, req.topic, req.payload, {
-				maxRuns: req.maxRuns,
-			});
-			return { scheduled: true };
-		},
-	};
+	return new SchedulerScheduleIntervalOSService(scheduler);
 }
+
+export const SchedulerStateExportOSService = createOSServiceClass(SCHEDULER_STATE_EXPORT, {
+	requiredPermissions: ["scheduler:read"],
+	execute: ([scheduler]: [SchedulerService]) => scheduler.exportState(),
+});
 
 export function createSchedulerStateExportService(
 	scheduler: SchedulerService,
 ): OSService<Record<string, never>, ReturnType<SchedulerService["exportState"]>> {
-	return {
-		name: SCHEDULER_STATE_EXPORT,
-		requiredPermissions: ["scheduler:read"],
-		execute: async () => scheduler.exportState(),
-	};
+	return new SchedulerStateExportOSService(scheduler);
 }
+
+export const SchedulerStateImportOSService = createOSServiceClass(SCHEDULER_STATE_IMPORT, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService], req: {
+		tasks?: SchedulerPersistedTask[];
+		failures?: SchedulerFailureRecord[];
+	}) => scheduler.restoreState(req),
+});
 
 export function createSchedulerStateImportService(
 	scheduler: SchedulerService,
@@ -472,53 +486,53 @@ export function createSchedulerStateImportService(
 		restoredFailures: number;
 	}
 > {
-	return {
-		name: SCHEDULER_STATE_IMPORT,
-		requiredPermissions: ["scheduler:write"],
-		execute: async (req) => scheduler.restoreState(req),
-	};
+	return new SchedulerStateImportOSService(scheduler);
 }
+
+export const SchedulerStatePersistOSService = createOSServiceClass(SCHEDULER_STATE_PERSIST, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService]) => scheduler.persistState(),
+});
 
 export function createSchedulerStatePersistService(
 	scheduler: SchedulerService,
 ): OSService<Record<string, never>, { persisted: boolean; tasks: number; failures: number }> {
-	return {
-		name: SCHEDULER_STATE_PERSIST,
-		requiredPermissions: ["scheduler:write"],
-		execute: async () => scheduler.persistState(),
-	};
+	return new SchedulerStatePersistOSService(scheduler);
 }
+
+export const SchedulerStateRecoverOSService = createOSServiceClass(SCHEDULER_STATE_RECOVER, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService]) => scheduler.recoverState(),
+});
 
 export function createSchedulerStateRecoverService(
 	scheduler: SchedulerService,
 ): OSService<Record<string, never>, { recovered: boolean; restoredTasks: number; restoredFailures: number }> {
-	return {
-		name: SCHEDULER_STATE_RECOVER,
-		requiredPermissions: ["scheduler:write"],
-		execute: async () => scheduler.recoverState(),
-	};
+	return new SchedulerStateRecoverOSService(scheduler);
 }
+
+export const SchedulerFailuresClearOSService = createOSServiceClass(SCHEDULER_FAILURES_CLEAR, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService], req) => ({
+		cleared: scheduler.clearFailures(req.id),
+	}),
+});
 
 export function createSchedulerFailuresClearService(
 	scheduler: SchedulerService,
 ): OSService<ClearSchedulerFailuresRequest, { cleared: number }> {
-	return {
-		name: SCHEDULER_FAILURES_CLEAR,
-		requiredPermissions: ["scheduler:write"],
-		execute: async (req) => ({
-			cleared: scheduler.clearFailures(req.id),
-		}),
-	};
+	return new SchedulerFailuresClearOSService(scheduler);
 }
+
+export const SchedulerFailuresReplayOSService = createOSServiceClass(SCHEDULER_FAILURES_REPLAY, {
+	requiredPermissions: ["scheduler:write"],
+	execute: ([scheduler]: [SchedulerService], req) => ({
+		replayed: scheduler.replayFailure(req.id),
+	}),
+});
 
 export function createSchedulerFailuresReplayService(
 	scheduler: SchedulerService,
 ): OSService<ReplaySchedulerFailureRequest, { replayed: boolean }> {
-	return {
-		name: SCHEDULER_FAILURES_REPLAY,
-		requiredPermissions: ["scheduler:write"],
-		execute: async (req) => ({
-			replayed: scheduler.replayFailure(req.id),
-		}),
-	};
+	return new SchedulerFailuresReplayOSService(scheduler);
 }

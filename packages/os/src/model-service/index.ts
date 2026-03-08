@@ -1,4 +1,5 @@
 import { OSError } from "../kernel/errors.js";
+import { createOSServiceClass } from "../os-service-class.js";
 import { MODEL_GENERATE } from "../tokens.js";
 import type { OSService } from "../types/os.js";
 
@@ -36,10 +37,11 @@ export class ModelService {
 	}
 }
 
+export const ModelGenerateOSService = createOSServiceClass(MODEL_GENERATE, {
+	requiredPermissions: ["model:invoke"],
+	execute: ([modelService]: [ModelService], req) => modelService.generate(req),
+});
+
 export function createModelGenerateService(modelService: ModelService): OSService<ModelGenerateRequest, ModelGenerateResponse> {
-	return {
-		name: MODEL_GENERATE,
-		requiredPermissions: ["model:invoke"],
-		execute: async (req) => modelService.generate(req),
-	};
+	return new ModelGenerateOSService(modelService);
 }

@@ -1,5 +1,5 @@
 import { Inject } from './inject';
-import { InjectionTokenType } from './injector';
+import type { InjectionTokenType } from './injector';
 
 /**
  * 验证参数装饰器的参数

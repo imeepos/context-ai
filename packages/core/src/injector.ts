@@ -1,7 +1,7 @@
 import { InjectionToken } from './injection-token';
 import { ForwardRef } from './forward-ref';
 import { HostAttributeToken } from './host-attribute-token';
-import { Provider } from './provider';
+import type { Provider } from './provider';
 
 /**
  * 类

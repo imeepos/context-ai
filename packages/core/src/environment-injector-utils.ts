@@ -1,4 +1,4 @@
-import { Provider } from './provider';
+import type { Provider } from './provider';
 
 /**
  * 环境注入器工具函数

@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { vi } from "vitest";
+import { OS_APP_RUNTIME_REGISTRY } from "./di/tokens.js";
 import * as TOKENS from "./tokens.js";
 
 async function writeMockPageModule(root: string): Promise<void> {
@@ -714,6 +715,46 @@ describe("createDefaultLLMOS", () => {
 			await os.kernel.execute(TOKENS.SHELL_ENV_UNSET, { key: "AA" }, context);
 			const env2 = await os.kernel.execute(TOKENS.SHELL_ENV_LIST, { _: "list" }, context);
 			expect(env2.env.AA).toBeUndefined();
+		} finally {
+			await rm(root, { recursive: true, force: true });
+		}
+	});
+
+	it("destroys app injectors when the os injector is destroyed", async () => {
+		const root = await mkdtemp(join(tmpdir(), "os-destroy-"));
+		try {
+			await writeMockPageModule(root);
+			const os = createDefaultLLMOS({ pathPolicy: { allow: [root], deny: [] } });
+			const context = {
+				appId: "admin",
+				sessionId: "session-destroy",
+				permissions: ["app:manage", "app:read"],
+				workingDirectory: root,
+			};
+
+			await os.kernel.execute(
+				TOKENS.APP_INSTALL,
+				{
+					manifest: {
+						id: "app.cleanup",
+						name: "Cleanup",
+						version: "1.0.0",
+						entry: "index.js",
+						permissions: ["app:read"],
+					},
+				},
+				context,
+			);
+
+			const runtimeRegistry = os.injector.get(OS_APP_RUNTIME_REGISTRY);
+			const appInjector = runtimeRegistry.get("app.cleanup");
+			const destroySpy = vi.spyOn(appInjector, "destroy");
+
+			await os.injector.destroy();
+
+			expect(destroySpy).toHaveBeenCalledTimes(1);
+			expect(runtimeRegistry.has("app.cleanup")).toBe(false);
+			expect(runtimeRegistry.has("system")).toBe(false);
 		} finally {
 			await rm(root, { recursive: true, force: true });
 		}

@@ -1,5 +1,6 @@
 import type { EventBus } from "../kernel/event-bus.js";
 import { OSError } from "../kernel/errors.js";
+import { createOSServiceClass } from "../os-service-class.js";
 import {
 	NOTIFICATION_ACK,
 	NOTIFICATION_ACK_ALL,
@@ -576,143 +577,153 @@ export class NotificationService {
 	}
 }
 
+export const NotificationSendOSService = createOSServiceClass(NOTIFICATION_SEND, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req) => ({ sent: notification.send(req) }),
+});
+
 export function createNotificationSendService(
 	notification: NotificationService,
 ): OSService<NotifyRequest, { sent: boolean }> {
-	return {
-		name: NOTIFICATION_SEND,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => {
-			return { sent: notification.send(req) };
-		},
-	};
+	return new NotificationSendOSService(notification);
 }
+
+export const NotificationListOSService = createOSServiceClass(NOTIFICATION_LIST, {
+	requiredPermissions: ["notification:read"],
+	execute: ([notification]: [NotificationService], req) => ({
+		notifications: notification.query(req),
+	}),
+});
 
 export function createNotificationListService(
 	notification: NotificationService,
 ): OSService<NotificationListRequest, { notifications: NotificationRecord[] }> {
-	return {
-		name: NOTIFICATION_LIST,
-		requiredPermissions: ["notification:read"],
-		execute: async (req) => ({
-			notifications: notification.query(req),
-		}),
-	};
+	return new NotificationListOSService(notification);
 }
+
+export const NotificationMuteOSService = createOSServiceClass(NOTIFICATION_MUTE, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req) => {
+		notification.muteTopic(req);
+		return { muted: true as const };
+	},
+});
 
 export function createNotificationMuteService(
 	notification: NotificationService,
 ): OSService<MuteTopicRequest, { muted: true }> {
-	return {
-		name: NOTIFICATION_MUTE,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => {
-			notification.muteTopic(req);
-			return { muted: true };
-		},
-	};
+	return new NotificationMuteOSService(notification);
 }
+
+export const NotificationUnmuteOSService = createOSServiceClass(NOTIFICATION_UNMUTE, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req: { topic: string }) => ({
+		unmuted: notification.unmuteTopic(req.topic),
+	}),
+});
 
 export function createNotificationUnmuteService(
 	notification: NotificationService,
 ): OSService<{ topic: string }, { unmuted: boolean }> {
-	return {
-		name: NOTIFICATION_UNMUTE,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => ({
-			unmuted: notification.unmuteTopic(req.topic),
-		}),
-	};
+	return new NotificationUnmuteOSService(notification);
 }
+
+export const NotificationMuteListOSService = createOSServiceClass(NOTIFICATION_MUTE_LIST, {
+	requiredPermissions: ["notification:read"],
+	execute: ([notification]: [NotificationService]) => ({
+		mutes: notification.listMutes(),
+	}),
+});
 
 export function createNotificationMuteListService(
 	notification: NotificationService,
 ): OSService<Record<string, never>, { mutes: NotificationMuteRecord[] }> {
-	return {
-		name: NOTIFICATION_MUTE_LIST,
-		requiredPermissions: ["notification:read"],
-		execute: async () => ({
-			mutes: notification.listMutes(),
-		}),
-	};
+	return new NotificationMuteListOSService(notification);
 }
+
+export const NotificationStatsOSService = createOSServiceClass(NOTIFICATION_STATS, {
+	requiredPermissions: ["notification:read"],
+	execute: ([notification]: [NotificationService]) => ({
+		stats: notification.getStats(),
+	}),
+});
 
 export function createNotificationStatsService(
 	notification: NotificationService,
 ): OSService<Record<string, never>, { stats: NotificationStats }> {
-	return {
-		name: NOTIFICATION_STATS,
-		requiredPermissions: ["notification:read"],
-		execute: async () => ({
-			stats: notification.getStats(),
-		}),
-	};
+	return new NotificationStatsOSService(notification);
 }
+
+export const NotificationAckOSService = createOSServiceClass(NOTIFICATION_ACK, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req) => ({
+		acknowledged: notification.ack(req),
+	}),
+});
 
 export function createNotificationAckService(
 	notification: NotificationService,
 ): OSService<NotificationAckRequest, { acknowledged: number }> {
-	return {
-		name: NOTIFICATION_ACK,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => ({
-			acknowledged: notification.ack(req),
-		}),
-	};
+	return new NotificationAckOSService(notification);
 }
+
+export const NotificationAckAllOSService = createOSServiceClass(NOTIFICATION_ACK_ALL, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req) => ({
+		acknowledged: notification.ackAll(req),
+	}),
+});
 
 export function createNotificationAckAllService(
 	notification: NotificationService,
 ): OSService<NotificationAckAllRequest, { acknowledged: number }> {
-	return {
-		name: NOTIFICATION_ACK_ALL,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => ({
-			acknowledged: notification.ackAll(req),
-		}),
-	};
+	return new NotificationAckAllOSService(notification);
 }
+
+export const NotificationCleanupOSService = createOSServiceClass(NOTIFICATION_CLEANUP, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req) => notification.cleanup(req),
+});
 
 export function createNotificationCleanupService(
 	notification: NotificationService,
 ): OSService<NotificationCleanupRequest, { notifications: number; mutes: number }> {
-	return {
-		name: NOTIFICATION_CLEANUP,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => notification.cleanup(req),
-	};
+	return new NotificationCleanupOSService(notification);
 }
+
+export const NotificationPolicyUpdateOSService = createOSServiceClass(NOTIFICATION_POLICY_UPDATE, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req: NotificationPolicyPatch) => ({
+		policy: notification.updatePolicy(req),
+	}),
+});
 
 export function createNotificationPolicyUpdateService(
 	notification: NotificationService,
 ): OSService<NotificationPolicyPatch, { policy: ReturnType<NotificationService["getPolicy"]> }> {
-	return {
-		name: NOTIFICATION_POLICY_UPDATE,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => ({
-			policy: notification.updatePolicy(req),
-		}),
-	};
+	return new NotificationPolicyUpdateOSService(notification);
 }
+
+export const NotificationChannelConfigureOSService = createOSServiceClass(NOTIFICATION_CHANNEL_CONFIGURE, {
+	requiredPermissions: ["notification:write"],
+	execute: ([notification]: [NotificationService], req) => notification.configureChannels(req),
+});
 
 export function createNotificationChannelConfigureService(
 	notification: NotificationService,
 ): OSService<NotificationChannelsConfig, { configured: string[] }> {
-	return {
-		name: NOTIFICATION_CHANNEL_CONFIGURE,
-		requiredPermissions: ["notification:write"],
-		execute: async (req) => notification.configureChannels(req),
-	};
+	return new NotificationChannelConfigureOSService(notification);
 }
+
+export const NotificationChannelStatsOSService = createOSServiceClass(NOTIFICATION_CHANNEL_STATS, {
+	requiredPermissions: ["notification:read"],
+	execute: ([notification]: [NotificationService]) => ({
+		channels: notification.getChannelStats(),
+	}),
+});
 
 export function createNotificationChannelStatsService(
 	notification: NotificationService,
 ): OSService<Record<string, never>, { channels: ReturnType<NotificationService["getChannelStats"]> }> {
-	return {
-		name: NOTIFICATION_CHANNEL_STATS,
-		requiredPermissions: ["notification:read"],
-		execute: async () => ({
-			channels: notification.getChannelStats(),
-		}),
-	};
+	return new NotificationChannelStatsOSService(notification);
 }
