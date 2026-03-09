@@ -7,21 +7,28 @@ import * as path from "node:path";
 export class ShellSessionStore {
 
     constructor(@Inject(SHELL_SESSION_FILE) private readonly sessionFile: string) { }
-
+    getEnv() {
+        const env = this.get();
+        const object: Record<string, string> = {}
+        Object.keys(env).map(key => {
+            const val = env[key]!;
+            object[key] = val.value
+        })
+        return object;
+    }
     /**
      * Gets the current environment for the given session.
      * @returns The current environment for the given session.
      */
-    get(): NodeJS.ProcessEnv {
+    get(): Record<string, { value: string, description?: string }> {
         try {
             // 检查文件是否存在
             if (!fs.existsSync(this.sessionFile)) {
                 return {};
             }
-
             // 读取并解析 JSON 文件
             const content = fs.readFileSync(this.sessionFile, "utf-8");
-            return JSON.parse(content) as NodeJS.ProcessEnv;
+            return JSON.parse(content)
         } catch (error) {
             // 文件损坏或解析失败时返回空对象
             console.error(`Failed to read session file: ${this.sessionFile}`, error);
@@ -33,14 +40,13 @@ export class ShellSessionStore {
      * Sets the current environment for the given session.
      * @param env The environment to set.
      */
-    set(env: NodeJS.ProcessEnv): void {
+    set(env: Record<string, { value: string, description?: string }>): void {
         try {
             // 确保父目录存在
             const dir = path.dirname(this.sessionFile);
             if (!fs.existsSync(dir)) {
                 fs.mkdirSync(dir, { recursive: true });
             }
-
             // 写入 JSON 文件，格式化输出
             const content = JSON.stringify(env, null, 2);
             fs.writeFileSync(this.sessionFile, content, "utf-8");
@@ -55,9 +61,9 @@ export class ShellSessionStore {
      * @param key The key of the environment variable to set.
      * @param value The value of the environment variable to set.
      */
-    setVar(key: string, value: string): void {
+    setVar(key: string, value: string, description?: string): void {
         const env = this.get();
-        env[key] = value;
+        env[key] = { value, description };
         this.set(env);
     }
 

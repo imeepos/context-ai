@@ -2,6 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { Action, Token } from "../tokens.js";
 import { SHELL_PERMISSION } from "./shell-execute.action.js";
 import type { Injector } from "@context-ai/core";
+import { ShellSessionStore } from "../core/shell-session.js";
 
 // ============================================================================
 // Shell Env Unset Action - 请求/响应 Schema 定义
@@ -52,9 +53,8 @@ export const shellEnvUnsetAction: Action<typeof ShellEnvUnsetRequestSchema, type
     requiredPermissions: [SHELL_PERMISSION],
     dependencies: [],
     execute: async (params: ShellEnvUnsetRequest, _injector: Injector): Promise<ShellEnvUnsetResponse> => {
-        // 删除环境变量
-        delete process.env[params.key];
-
+        const store = _injector.get(ShellSessionStore)
+        store.unsetVar(params.key)
         return { ok: true };
     },
 };

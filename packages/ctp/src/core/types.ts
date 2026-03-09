@@ -40,8 +40,10 @@ export interface RenderedContext {
 }
 
 export interface JSXElement {
+  /** 元素类型：HTML 标签名（如 'div'）或组件函数 */
   type: string | Function;
+  /** 元素属性对象 */
   props: Record<string, unknown> | null;
-  key?: string | number;
+  /** React key，用于列表渲染时的 diff 优化 */
+  key?: string | null;
 }
-

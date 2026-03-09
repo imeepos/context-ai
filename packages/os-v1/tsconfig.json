@@ -6,10 +6,16 @@
     "composite": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
-    "lib": ["ES2022"],
-    "types": ["node"],
+    "lib": [
+      "ES2022"
+    ],
+    "types": [
+      "node"
+    ],
     "experimentalDecorators": true,
-    "emitDecoratorMetadata": true
+    "emitDecoratorMetadata": true,
+    "jsx": "preserve",
+    "skipLibCheck": true
   },
   "include": [
     "src/**/*"

@@ -2,6 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { Action, Token } from "../tokens.js";
 import { SHELL_PERMISSION } from "./shell-execute.action.js";
 import type { Injector } from "@context-ai/core";
+import { ShellSessionStore } from "../core/shell-session.js";
 
 // ============================================================================
 // Shell Env List Action - 请求/响应 Schema 定义
@@ -50,7 +51,8 @@ export const shellEnvListAction: Action<typeof ShellEnvListRequestSchema, typeof
     requiredPermissions: [SHELL_PERMISSION],
     dependencies: [],
     execute: async (_params: ShellEnvListRequest, _injector: Injector): Promise<ShellEnvListResponse> => {
-        // 返回当前进程的所有环境变量
-        return { ...process.env } as Record<string, string>;
+        const store = _injector.get(ShellSessionStore)
+        const env = store.getEnv()
+        return env;
     },
 };

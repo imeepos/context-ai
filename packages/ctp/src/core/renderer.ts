@@ -11,14 +11,13 @@ import type { TextProps } from '../components/text.js';
 import type { ExampleProps } from '../components/example.js';
 import { buildPrompt } from './builder.js';
 import type { AgentTool } from '@mariozechner/pi-agent-core';
-
 /**
  * Render a JSX element or function component into a RenderedContext
  * @param component - JSXElement or function returning JSXElement
  * @returns Promise<RenderedContext> - The rendered context with prompt, tools, and data views
  */
 export async function render(
-  component: JSXElement | (() => JSXElement | Promise<JSXElement>)
+  element: JSXElement,
 ): Promise<RenderedContext> {
   // Create a fresh RenderedContext
   const ctx: RenderedContext = {
@@ -28,15 +27,8 @@ export async function render(
     dataViews: [],
     metadata: {}
   };
-
-  // Execute component if it's a function
-  const element = typeof component === 'function'
-    ? await component()
-    : component;
-
   // Walk the JSX tree
   await walkJSX(element, ctx);
-
   // Build the final prompt using buildPrompt
   ctx.prompt = buildPrompt(ctx);
 

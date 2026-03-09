@@ -40,6 +40,7 @@
   },
   "dependencies": {
     "@mariozechner/pi-agent-core": "^0.56.0",
-    "@mariozechner/pi-ai": "^0.56.0"
+    "@mariozechner/pi-ai": "^0.56.0",
+    "@context-ai/core": "*"
   }
 }

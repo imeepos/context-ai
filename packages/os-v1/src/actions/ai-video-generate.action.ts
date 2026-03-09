@@ -2,7 +2,6 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { Action, Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
 import OpenAI from "openai";
-import { ShellEnvListRequestSchema } from "./shell-env-list.action.js";
 import { ShellSessionStore } from "../core/shell-session.js";
 
 // ============================================================================

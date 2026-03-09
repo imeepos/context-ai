@@ -2,6 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { Action, Token } from "../tokens.js";
 import { SHELL_PERMISSION } from "./shell-execute.action.js";
 import type { Injector } from "@context-ai/core";
+import { ShellSessionStore } from "../core/shell-session.js";
 
 // ============================================================================
 // Shell Env Set Action - 请求/响应 Schema 定义
@@ -56,9 +57,8 @@ export const shellEnvSetAction: Action<typeof ShellEnvSetRequestSchema, typeof S
     requiredPermissions: [SHELL_PERMISSION],
     dependencies: [],
     execute: async (params: ShellEnvSetRequest, _injector: Injector): Promise<ShellEnvSetResponse> => {
-        // 设置环境变量到当前进程
-        process.env[params.key] = params.value;
-
+        const store = _injector.get(ShellSessionStore)
+        store.setVar(params.key, params.value, params.description)
         return { ok: true };
     },
 };

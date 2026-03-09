@@ -1,6 +1,8 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { Action, Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
+import { ShellSessionStore } from "../core/shell-session.js";
+import { spawn } from "node:child_process";
 
 // ============================================================================
 // Shell Execute Action - 请求/响应 Schema 定义
@@ -100,30 +102,53 @@ export const shellExecuteAction: Action<typeof ShellExecuteRequestSchema, typeof
     response: ShellExecuteResultSchema,
     requiredPermissions: [SHELL_PERMISSION],
     dependencies: [],
-    execute: async (params: ShellExecuteRequest, _injector: Injector): Promise<ShellExecuteResult> => {
-        const { exec } = await import('child_process');
-        const { promisify } = await import('util');
-        const execAsync = promisify(exec);
+    execute: async (params: ShellExecuteRequest, injector: Injector): Promise<ShellExecuteResult> => {
+        return new Promise((resolve, reject) => {
+            // 获取会话环境变量
+            const store = injector.get(ShellSessionStore);
+            const sessionEnv = store.getEnv();
 
-        try {
-            const { stdout, stderr } = await execAsync(params.command, {
-                timeout: params.timeoutMs,
-                encoding: 'utf-8',
-                maxBuffer: 10 * 1024 * 1024, // 10MB
+            // 平台特定的 shell 选择
+            const shell = process.platform === "win32" ? "powershell.exe" : "bash";
+            const shellArgs = process.platform === "win32" ? ["-Command", params.command] : ["-lc", params.command];
+
+            // 启动子进程
+            const child = spawn(shell, shellArgs, {
+                env: { ...process.env, ...sessionEnv },
+                stdio: ["ignore", "pipe", "pipe"],
             });
 
-            return {
-                stdout: stdout || '',
-                stderr: stderr || '',
-                exitCode: 0,
-            };
-        } catch (error: any) {
-            // exec 在非零退出码时会抛出错误
-            return {
-                stdout: error.stdout || '',
-                stderr: error.stderr || error.message || '',
-                exitCode: error.code || 1,
-            };
-        }
+            // 缓冲 stdout 和 stderr
+            const stdoutChunks: Buffer[] = [];
+            const stderrChunks: Buffer[] = [];
+
+            // 超时处理
+            let timeoutHandle: NodeJS.Timeout | undefined;
+            if (params.timeoutMs && params.timeoutMs > 0) {
+                timeoutHandle = setTimeout(() => {
+                    child.kill();
+                }, params.timeoutMs);
+            }
+
+            // 收集输出
+            child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
+            child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+
+            // 错误处理
+            child.on("error", (error) => {
+                if (timeoutHandle) clearTimeout(timeoutHandle);
+                reject(error);
+            });
+
+            // 进程结束
+            child.on("close", (code) => {
+                if (timeoutHandle) clearTimeout(timeoutHandle);
+                resolve({
+                    stdout: Buffer.concat(stdoutChunks).toString("utf8"),
+                    stderr: Buffer.concat(stderrChunks).toString("utf8"),
+                    exitCode: code ?? -1,
+                });
+            });
+        });
     },
 };

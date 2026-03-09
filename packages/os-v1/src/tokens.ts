@@ -24,28 +24,9 @@
  * 数据流：Application → Pages → RenderFactory → Context → AI Agent 执行
  */
 
-import { InjectionToken, Injector } from '@context-ai/core';
-import type { AgentTool } from '@mariozechner/pi-agent-core';
+import { InjectionToken, Injector, type Provider } from '@context-ai/core';
 import type { Static, TSchema } from '@mariozechner/pi-ai';
-
-// ============================================================================
-// 基础类型定义
-// ============================================================================
-
-/**
- * JSX 元素结构
- *
- * 模拟 React 的虚拟 DOM 节点，用于表示提示词中的结构化内容。
- * 组件函数返回此类型，最终会被渲染成字符串形式的 prompt。
- */
-export interface JSXElement {
-    /** 元素类型：HTML 标签名（如 'div'）或组件函数 */
-    type: string | Function;
-    /** 元素属性对象 */
-    props: Record<string, unknown> | null;
-    /** React key，用于列表渲染时的 diff 优化 */
-    key?: string | number;
-}
+import type { RenderedContext, JSXElement } from '@context-ai/ctp';
 
 // ============================================================================
 // 应用与页面定义
@@ -65,7 +46,11 @@ export interface Application {
     /** 版本号 */
     version: string;
     /** 入口文件路径 export default [] as Page[]*/
-    main: string;
+    pages: Page[];
+    /**
+     * 服务注入到injector
+     */
+    providers: Provider[]
 }
 export const APPLICATIONS = new InjectionToken<Application[]>("os.applications");
 /**
@@ -85,6 +70,8 @@ export interface Page<TParameters extends TSchema = TSchema> {
     path: string;
     /** 参数 Schema，用于验证传入的 props */
     props: TParameters;
+    // 组件
+    factory: ComponentFactory<Static<TParameters>>;
 }
 
 // ============================================================================
@@ -99,31 +86,8 @@ export interface Page<TParameters extends TSchema = TSchema> {
  *
  * @template Props - 组件属性类型
  */
-export interface Component<Props> {
-    (props: Props): Promise<JSXElement>;
-}
-
-/**
- * 提示词类型别名
- *
- * 最终发送给 AI Agent 的文本内容，由组件树渲染而成。
- */
-export type Prompt = string;
-
-/**
- * AI Agent 执行上下文
- *
- * 包含执行 AI 调用所需的所有信息：
- * - prompt: 渲染后的提示词文本
- * - tools: Agent 可调用的工具列表
- *
- * 这是整个渲染流程的最终输出，将被传递给 AI Agent 执行引擎。
- */
-export interface Context {
-    /** 渲染后的提示词 */
-    prompt: Prompt;
-    /** Agent 可用的工具列表 */
-    tools: AgentTool[];
+export interface ComponentFactory<Props> {
+    (props: Props, injector: Injector): Promise<JSXElement>;
 }
 
 // ============================================================================
@@ -131,38 +95,13 @@ export interface Context {
 // ============================================================================
 
 /**
- * 渲染工厂接口
- *
- * 负责根据给定的 props 创建执行上下文（Context）。
- * 每个 Page 对应一个 RenderFactory 实例。
- *
- * 工作流程：
- * 1. 接收页面参数 props
- * 2. 渲染组件树生成 prompt
- * 3. 收集组件树中提取的 tools
- * 4. 返回完整的 Context
- *
- * @template P - 页面参数类型，由 Page.props 的 Static 类型推断
+ * 从本地文件夹加载应用
  */
-export interface RenderFactory<P> {
-    create(props: P): Promise<Context>
+export interface ApplicationLoader {
+    load(): Promise<Application[]>;
 }
 
-/**
- * 应用工厂接口
- *
- * 顶级工厂，负责解析 Application 定义并返回所有可用页面。
- * 这是 DI 容器的入口点。
- *
- * 职责：
- * - 加载应用配置
- * - 扫描并注册所有页面
- * - 返回页面列表供路由使用
- */
-export interface ApplicationFactory {
-    create(app: Application): Promise<Page[]>;
-}
-
+export const APPLICATION_LOADER = new InjectionToken<ApplicationLoader[]>(`APPLICATION_LOADER`)
 /**
  * 页面工厂接口
  *
@@ -182,10 +121,11 @@ export interface ApplicationFactory {
  * - 这样确保了从 Schema 到 TypeScript 的类型安全
  */
 export interface PageFactory {
-    create<TParameters extends TSchema = TSchema>(
-        page: Page<TParameters>
-    ): Promise<RenderFactory<Static<TParameters>>>;
+    path: string;
+    create<TParameters extends TSchema = TSchema>(params: Static<TParameters>, injector: Injector): Promise<RenderedContext>;
 }
+
+export const PAGES = new InjectionToken<PageFactory[]>(`PAGES`)
 
 // ============================================================================
 // 系统能力层（Action System）
@@ -302,6 +242,7 @@ export interface ActionExecuter {
     ): Promise<Static<TResponse>>;
 }
 
+
 // ============================================================================
 // ActionExecuter 相关 Token
 // ============================================================================
@@ -336,6 +277,7 @@ export const USER_PERMISSIONS = new InjectionToken<string[]>("USER_PERMISSIONS")
  * ~/.context-ai/
  */
 export const ROOT_DIR = new InjectionToken<string>("ROOT_DIR");
+export const PROJECT_ROOT = new InjectionToken<string>(`PROJECT_ROOT`)
 /**
  * ~/.context-ai/shell/sessions
  * ~/.context-ai/shell/pids
@@ -347,3 +289,68 @@ export const SHELL_PID_DIR = new InjectionToken<string>("SHELL_PID_DIR");
 export const SHELL_LOG_DIR = new InjectionToken<string>("SHELL_LOG_DIR");
 
 export const CURRENT_DIR = new InjectionToken<string>("CURRENT_DIR");
+
+/**
+ * 用户输入
+ */
+export const USER_PROMPT = new InjectionToken<string>("USER_PROMPT")
+export const SESSION_ID = new InjectionToken<string>(`SESSION_ID`)
+// ============================================================================
+// Scheduler 相关 Token
+// ============================================================================
+
+/**
+ * EventBus 注入令牌
+ *
+ * 事件总线接口，用于发布和订阅事件
+ */
+export const EVENT_BUS = new InjectionToken<EventBus>("EVENT_BUS");
+
+/**
+ * SchedulerServiceOptions 注入令牌
+ *
+ * 调度器服务配置选项
+ */
+export const SCHEDULER_OPTIONS = new InjectionToken<SchedulerServiceOptions>("SCHEDULER_OPTIONS");
+
+/**
+ * 事件总线接口
+ */
+export interface EventBus {
+    /** 发布事件 */
+    publish(topic: string, payload: unknown): void;
+    /** 订阅事件（可选） */
+    subscribe?(topic: string, handler: (payload: unknown) => void): void;
+}
+
+/**
+ * 调度器状态存储适配器接口
+ */
+export interface SchedulerStateStorageAdapter {
+    /** 加载状态快照 */
+    load(): SchedulerStateSnapshot | undefined;
+    /** 保存状态快照 */
+    save(snapshot: SchedulerStateSnapshot): void;
+}
+
+/**
+ * 调度器状态快照
+ */
+export interface SchedulerStateSnapshot {
+    /** 持久化任务列表 */
+    tasks: any[];
+    /** 失败记录列表 */
+    failures: any[];
+}
+
+/**
+ * 调度器服务选项
+ */
+export interface SchedulerServiceOptions {
+    /** 存储适配器 */
+    storage?: SchedulerStateStorageAdapter;
+    /** 是否自动持久化 */
+    autoPersist?: boolean;
+    /** 默认时区（用于 cron 任务） */
+    defaultTimezone?: string;
+}
