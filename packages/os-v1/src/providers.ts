@@ -4,14 +4,18 @@ import {
     ACTIONS,
     APPLICATION_LOADER,
     CURRENT_DIR,
+    LOG_DIR,
     PROJECT_ROOT,
     ROOT_DIR,
-    SHELL_LOG_DIR,
     SHELL_PID_DIR,
     SHELL_SESSION_DIR,
 } from "./tokens.js";
 import { homedir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { ActionExecuterImpl } from "./action-executer.js";
 import { shellExecuteAction } from "./actions/shell-execute.action.js";
 import { shellEnvSetAction } from "./actions/shell-env-set.action.js";
@@ -43,13 +47,14 @@ import { FileSchedulerStateAdapter } from "./core/scheduler-persistence.js";
 import { EventBusService } from "./core/event-bus.js";
 import { ApplicationLoaderLocal } from "./core/ApplicationLoaderLocal.js";
 import { ApplicationLoaderSystem } from "./core/ApplicationLoaderSystem.js";
+import { LOOP_REQUEST_TOKEN, loopRequestAction } from "./actions/loop.action.js";
 
 export const providers: Provider[] = [
     // 路径常量注册
     { provide: ROOT_DIR, useValue: join(homedir(), '.context-ai') },
     { provide: SHELL_SESSION_DIR, useFactory: (root: string) => join(root, 'shell', 'sessions'), deps: [ROOT_DIR] },
     { provide: SHELL_PID_DIR, useFactory: (root: string) => join(root, 'shell', 'pids'), deps: [ROOT_DIR] },
-    { provide: SHELL_LOG_DIR, useFactory: (root: string) => join(root, 'shell', 'logs'), deps: [ROOT_DIR] },
+    { provide: LOG_DIR, useFactory: (root: string) => join(root, 'logs'), deps: [ROOT_DIR] },
     { provide: CURRENT_DIR, useValue: process.cwd() },
     { provide: PROJECT_ROOT, useValue: join(__dirname, '../../../') },
     // Action 注册
@@ -224,7 +229,6 @@ export const providers: Provider[] = [
         provide: APPLICATION_LOADER,
         useFactory: (root: string) => {
             const path = join(root, 'addons')
-            console.log({ path })
             return new ApplicationLoaderLocal(path)
         },
         deps: [PROJECT_ROOT],
@@ -243,4 +247,6 @@ export const providers: Provider[] = [
         useFactory: (actions) => new ActionExecuterImpl(actions),
         deps: [ACTIONS]
     },
+    { provide: LOOP_REQUEST_TOKEN, useValue: loopRequestAction },
+    { provide: ACTIONS, useValue: loopRequestAction, multi: true }
 ]

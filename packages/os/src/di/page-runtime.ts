@@ -11,9 +11,6 @@ import {
 } from "../system-runtime-bridge.js";
 import type { AppRuntimeRegistry } from "./app-runtime-registry.js";
 import { createPageInjector } from "./create-page-injector.js";
-import { loadAppPageModule } from "./page-module-loader.js";
-import { toAppPageRenderResult } from "./page-render-output.js";
-import { PAGE_RENDER_CONTEXT, PAGE_SYSTEM_INPUT } from "./tokens.js";
 
 export function createAppPageSystemRuntime(kernel: LLMOSKernel): AppPageSystemRuntime {
 	return createSystemRuntimeView(
@@ -43,18 +40,8 @@ export function createAppPageRenderer(input: CreateAppPageRendererInput): AppPag
 				context,
 			});
 			try {
-				const { contextFactory } = await loadAppPageModule(page, context);
-				const injectedContext = pageInjector.get(PAGE_RENDER_CONTEXT);
-				const system = pageInjector.get(PAGE_SYSTEM_INPUT);
-				const ctpNode = await contextFactory({
-					appId,
-					page,
-					context: injectedContext,
-					system,
-				});
-				const { render: renderCTP } = await import("@context-ai/ctp");
-				const rendered = await renderCTP(ctpNode);
-				return toAppPageRenderResult(page, rendered);
+				throw new Error(``)
+				
 			} finally {
 				await pageInjector.destroy();
 			}

@@ -4,7 +4,7 @@
  */
 
 import { Injectable, Optional } from "@context-ai/core";
-import { parseExpression } from "cron-parser";
+import cronParser from "cron-parser";
 import type {
 	TaskHandle,
 	SchedulerFailureRecord,
@@ -171,7 +171,7 @@ export class SchedulerService {
 		// 验证 cron 表达式并计算下次执行时间
 		let nextRun: Date;
 		try {
-			const interval = parseExpression(cronExpression, {
+			const interval = cronParser.parseExpression(cronExpression, {
 				tz: timezone || this.options?.defaultTimezone || undefined,
 			});
 			nextRun = interval.next().toDate();
@@ -207,7 +207,7 @@ export class SchedulerService {
 
 			// 计算并调度下次执行
 			try {
-				const nextInterval = parseExpression(cronExpression, {
+				const nextInterval = cronParser.parseExpression(cronExpression, {
 					currentDate: new Date(),
 					tz: timezone || this.options?.defaultTimezone || undefined,
 				});

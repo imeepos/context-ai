@@ -18,9 +18,9 @@
     "@context-ai/core": "*",
     "@mariozechner/pi-agent-core": "^0.56.0",
     "@mariozechner/pi-ai": "^0.56.0",
+    "@context-ai/agent": "*",
     "cron-parser": "^4.9.0",
-    "openai": "^6.26.0",
-    "react": "^18.3.1"
+    "openai": "^6.26.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

@@ -1,8 +1,41 @@
 import { Type, type Static } from "@sinclair/typebox";
-import { PAGES, type Action, type Token } from "../tokens.js";
+import { PAGES, SESSION_LOGGER, type Action, type Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
 import { createAgent } from '@context-ai/agent';
 import type { AgentEvent, AgentMessage } from '@mariozechner/pi-agent-core';
+import { findMatchingPage } from "../core/path-matcher.js";
+
+// ============================================================================
+// 类型定义
+// ============================================================================
+
+interface TokenUsage {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    totalTokens: number;
+}
+
+interface ToolCallRecord {
+    toolCallId: string;
+    toolName: string;
+    args: Record<string, unknown>;
+    result: unknown;
+    isError: boolean;
+    startTime: number;
+    endTime: number;
+    duration: number;
+}
+
+interface ApiCallRecord {
+    turnIndex: number;
+    provider: string;
+    model: string;
+    usage: TokenUsage;
+    stopReason: string;
+    timestamp: number;
+}
 
 // ============================================================================
 // Loop Action - 请求/响应 Schema 定义
@@ -85,12 +118,43 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
     requiredPermissions: [LOOP_REQUEST_PERMISSION],
     dependencies: [],
     execute: async (params: LoopRequestRequest, _injector: Injector): Promise<LoopRequestResponse> => {
-        try {
-            // 1. 查找对应的页面
-            const pages = _injector.get(PAGES);
-            const page = pages.find(p => p.path === params.path);
+        const logger = _injector.get(SESSION_LOGGER);
+        const executionStartTime = Date.now();
 
-            if (!page) {
+        // ============================================================================
+        // 1. 请求日志 - 记录完整的请求信息
+        // ============================================================================
+        logger.info('LOOP_ACTION', '========== LOOP REQUEST START ==========');
+        logger.info('LOOP_ACTION', 'Request Parameters', {
+            path: params.path,
+            prompt: params.prompt,
+            promptLength: params.prompt.length,
+            timestamp: new Date().toISOString()
+        });
+
+        // 用于统计的数据结构
+        const apiCalls: ApiCallRecord[] = [];
+        const toolCalls: ToolCallRecord[] = [];
+        let currentToolCall: Partial<ToolCallRecord> | null = null;
+        let toolCallsCount = 0;
+
+        try {
+            // ============================================================================
+            // 2. 页面匹配 - 记录路由信息
+            // ============================================================================
+            const pages = _injector.get(PAGES, []);
+            logger.info('LOOP_ACTION', 'Available Pages', {
+                totalPages: pages.length,
+                pagePaths: pages.map(p => p.path)
+            });
+
+            const matchResult = findMatchingPage(pages, params.path);
+
+            if (!matchResult) {
+                logger.warn('LOOP_ACTION', 'Page Not Found', {
+                    requestedPath: params.path,
+                    availablePaths: pages.map(p => p.path)
+                });
                 return {
                     success: false,
                     output: "",
@@ -99,42 +163,231 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
                 };
             }
 
-            // 2. 创建页面上下文
-            const ctx = await page.create(params, _injector);
+            const { page, params: routeParams } = matchResult;
+            logger.info('LOOP_ACTION', 'Page Matched', {
+                pagePath: page.path,
+                routeParams,
+                matchedPath: params.path
+            });
 
-            // 3. 创建 Agent
+            // ============================================================================
+            // 3. 页面上下文创建 - 记录完整的 system prompt 和工具信息
+            // ============================================================================
+            const ctx = await page.create({ ...routeParams }, _injector);
+
+            logger.info('LOOP_ACTION', 'Page Context Created', {
+                toolsCount: ctx.tools.length,
+                systemPromptLength: ctx.prompt.length
+            });
+
+            // 记录完整的 System Prompt
+            logger.info('LOOP_ACTION', 'System Prompt (Full)', {
+                prompt: ctx.prompt
+            });
+
+            // 记录所有可用工具的详细信息
+            logger.info('LOOP_ACTION', 'Available Tools', {
+                tools: ctx.tools.map(tool => ({
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters
+                }))
+            });
+
+            // ============================================================================
+            // 4. 创建 Agent
+            // ============================================================================
             const agent = createAgent(ctx.prompt, ctx.tools);
+            logger.info('LOOP_ACTION', 'Agent Created', {
+                toolsCount: ctx.tools.length
+            });
 
-            // 4. 设置结果收集器
+            // ============================================================================
+            // 5. 设置结果收集器
+            // ============================================================================
             let finalMessages: AgentMessage[] = [];
-            let toolCallsCount = 0;
             let executionError: string | undefined;
+            let turnIndex = 0;
 
-            // 5. 订阅 Agent 事件
+            // ============================================================================
+            // 6. 订阅 Agent 事件 - 详细记录所有事件
+            // ============================================================================
             const unsubscribe = agent.subscribe((event: AgentEvent) => {
-                if (event.type === "agent_end") {
-                    finalMessages = event.messages;
+
+                if (event.type === "turn_start") {
+                    turnIndex++;
+                    logger.info('LOOP_ACTION', `========== TURN #${turnIndex} START ==========`, {
+                        turnIndex,
+                        timestamp: new Date().toISOString()
+                    });
+
+                } else if (event.type === "turn_end") {
+                    const message = event.message;
+                    const messageRole = 'role' in message ? message.role : 'unknown';
+
+                    logger.info('LOOP_ACTION', `Turn #${turnIndex} - Response Received`, {
+                        role: messageRole,
+                        hasToolResults: event.toolResults.length > 0,
+                        toolResultsCount: event.toolResults.length
+                    });
+
+                    // 记录完整的消息内容
+                    if ('content' in message && Array.isArray(message.content)) {
+                        message.content.forEach((content, idx) => {
+                            if (content.type === 'text') {
+                                logger.info('LOOP_ACTION', `Turn #${turnIndex} - Text Content`, {
+                                    index: idx,
+                                    text: 'text' in content ? content.text : '',
+                                    textLength: 'text' in content ? content.text.length : 0
+                                });
+                            } else if (content.type === 'thinking') {
+                                logger.info('LOOP_ACTION', `Turn #${turnIndex} - Thinking Content`, {
+                                    index: idx,
+                                    thinking: 'thinking' in content ? content.thinking : '',
+                                    signature: 'thinkingSignature' in content ? content.thinkingSignature : undefined
+                                });
+                            } else if (content.type === 'toolCall') {
+                                logger.info('LOOP_ACTION', `Turn #${turnIndex} - Tool Call Requested`, {
+                                    index: idx,
+                                    toolCallId: 'id' in content ? content.id : undefined,
+                                    toolName: 'name' in content ? content.name : undefined,
+                                    arguments: 'arguments' in content ? content.arguments : undefined
+                                });
+                            }
+                        });
+                    }
+
+                    // 记录 API 使用情况
+                    if ('usage' in message) {
+                        const usage = message.usage as TokenUsage;
+                        const apiCall: ApiCallRecord = {
+                            turnIndex,
+                            provider: 'provider' in message ? (message.provider as string) : 'unknown',
+                            model: 'model' in message ? (message.model as string) : 'unknown',
+                            usage,
+                            stopReason: 'stopReason' in message ? (message.stopReason as string) : 'unknown',
+                            timestamp: Date.now()
+                        };
+                        apiCalls.push(apiCall);
+
+                        logger.info('LOOP_ACTION', `Turn #${turnIndex} - Token Usage`, {
+                            provider: apiCall.provider,
+                            model: apiCall.model,
+                            input: usage.input,
+                            output: usage.output,
+                            cacheRead: usage.cacheRead,
+                            cacheWrite: usage.cacheWrite,
+                            totalTokens: usage.totalTokens,
+                            stopReason: apiCall.stopReason
+                        });
+                    }
+
+                    logger.info('LOOP_ACTION', `========== TURN #${turnIndex} END ==========`, {
+                        turnIndex,
+                        duration: 'N/A'
+                    });
+
+                } else if (event.type === "tool_execution_start") {
+                    currentToolCall = {
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        args: event.args,
+                        startTime: Date.now()
+                    };
+
+                    logger.info('LOOP_ACTION', `Tool Execution START: ${event.toolName}`, {
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        arguments: event.args,
+                        timestamp: new Date().toISOString()
+                    });
+
                 } else if (event.type === "tool_execution_end") {
                     toolCallsCount++;
-                    // 检查工具执行是否出错
+
+                    const endTime = Date.now();
+                    const toolCallRecord: ToolCallRecord = {
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        args: currentToolCall?.args || {},
+                        result: event.result,
+                        isError: event.isError,
+                        startTime: currentToolCall?.startTime || endTime,
+                        endTime: endTime,
+                        duration: endTime - (currentToolCall?.startTime || endTime)
+                    };
+                    toolCalls.push(toolCallRecord);
+                    currentToolCall = null;
+
+                    logger.info('LOOP_ACTION', `Tool Execution END: ${event.toolName}`, {
+                        toolCallId: event.toolCallId,
+                        toolName: event.toolName,
+                        isError: event.isError,
+                        duration: `${toolCallRecord.duration}ms`,
+                        timestamp: new Date().toISOString()
+                    });
+
+                    // 记录完整的工具执行结果
+                    logger.info('LOOP_ACTION', `Tool Result: ${event.toolName}`, {
+                        toolCallId: event.toolCallId,
+                        result: event.result
+                    });
+
                     if (event.isError) {
                         executionError = `Tool execution error: ${event.toolName}`;
+                        logger.error('LOOP_ACTION', `Tool Execution ERROR: ${event.toolName}`, {
+                            toolCallId: event.toolCallId,
+                            error: event.result
+                        });
                     }
+
+                } else if (event.type === "agent_end") {
+                    finalMessages = event.messages;
+                    logger.info('LOOP_ACTION', 'Agent Execution Completed', {
+                        messagesCount: event.messages.length,
+                        totalTurns: turnIndex
+                    });
+
+                    // 记录所有消息的完整内容
+                    event.messages.forEach((msg, idx) => {
+                        logger.info('LOOP_ACTION', `Final Message #${idx}`, {
+                            index: idx,
+                            message: JSON.stringify(msg, null, 2)
+                        });
+                    });
                 }
             });
 
             try {
-                // 6. 执行 Agent 提示词
+                // ============================================================================
+                // 7. 执行 Agent 提示词
+                // ============================================================================
+                logger.info('LOOP_ACTION', 'Sending Prompt to Agent', {
+                    prompt: params.prompt,
+                    promptLength: params.prompt.length,
+                    conversationHistory: 0,
+                    timestamp: new Date().toISOString()
+                });
+
                 await agent.prompt(params.prompt, []);
 
-                // 7. 等待 Agent 完成
+                // ============================================================================
+                // 8. 等待 Agent 完成
+                // ============================================================================
                 await agent.waitForIdle();
+                const executionEndTime = Date.now();
+                const totalDuration = executionEndTime - executionStartTime;
 
-                // 8. 提取 Assistant 消息作为输出
+                logger.info('LOOP_ACTION', 'Agent Idle - Processing Results', {
+                    totalDuration: `${totalDuration}ms`,
+                    messagesCount: finalMessages.length
+                });
+
+                // ============================================================================
+                // 9. 提取 Assistant 消息作为输出
+                // ============================================================================
                 const assistantMessages = finalMessages
-                    .filter((msg: AgentMessage) =>
-                        'role' in msg && msg.role === 'assistant'
-                    )
+                    .filter((msg: AgentMessage) => 'role' in msg && msg.role === 'assistant')
                     .map((msg: AgentMessage) => {
                         if ('content' in msg && Array.isArray(msg.content)) {
                             return msg.content
@@ -148,26 +401,106 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
 
                 const output = assistantMessages.join('\n\n');
 
-                return {
+                // ============================================================================
+                // 10. 计算总 Token 使用量
+                // ============================================================================
+                const totalTokenUsage = apiCalls.reduce((acc, call) => ({
+                    input: acc.input + call.usage.input,
+                    output: acc.output + call.usage.output,
+                    cacheRead: acc.cacheRead + call.usage.cacheRead,
+                    cacheWrite: acc.cacheWrite + call.usage.cacheWrite,
+                    totalTokens: acc.totalTokens + call.usage.totalTokens
+                }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 });
+
+                // ============================================================================
+                // 11. 构建最终结果
+                // ============================================================================
+                const result = {
                     success: !executionError,
                     output: output || "(Agent completed with no text output)",
                     error: executionError,
                     toolCallsCount
                 };
 
+                // ============================================================================
+                // 12. 完整的执行摘要日志
+                // ============================================================================
+                logger.info('LOOP_ACTION', '========== EXECUTION SUMMARY ==========', {
+                    success: result.success,
+                    error: result.error,
+                    totalDuration: `${totalDuration}ms`,
+                    totalTurns: turnIndex,
+                    totalApiCalls: apiCalls.length,
+                    totalToolCalls: toolCallsCount
+                });
+
+                logger.info('LOOP_ACTION', 'Token Usage Summary', {
+                    totalInput: totalTokenUsage.input,
+                    totalOutput: totalTokenUsage.output,
+                    totalCacheRead: totalTokenUsage.cacheRead,
+                    totalCacheWrite: totalTokenUsage.cacheWrite,
+                    totalTokens: totalTokenUsage.totalTokens
+                });
+
+                logger.info('LOOP_ACTION', 'API Calls Detail', {
+                    calls: apiCalls.map(call => ({
+                        turn: call.turnIndex,
+                        model: call.model,
+                        input: call.usage.input,
+                        output: call.usage.output,
+                        total: call.usage.totalTokens,
+                        stopReason: call.stopReason
+                    }))
+                });
+
+                logger.info('LOOP_ACTION', 'Tool Calls Summary', {
+                    totalCalls: toolCalls.length,
+                    calls: toolCalls.map(call => ({
+                        toolName: call.toolName,
+                        toolCallId: call.toolCallId,
+                        duration: `${call.duration}ms`,
+                        isError: call.isError
+                    }))
+                });
+
+                logger.info('LOOP_ACTION', 'Final Output', {
+                    outputLength: result.output.length,
+                    output: result.output
+                });
+
+                logger.info('LOOP_ACTION', '========== LOOP REQUEST END ==========');
+
+                return result;
+
             } finally {
-                // 9. 清理订阅
+                // ============================================================================
+                // 13. 清理订阅
+                // ============================================================================
                 unsubscribe();
             }
 
         } catch (error) {
-            // 10. 错误处理
+            // ============================================================================
+            // 14. 错误处理
+            // ============================================================================
             const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorStack = error instanceof Error ? error.stack : undefined;
+            const executionEndTime = Date.now();
+            const totalDuration = executionEndTime - executionStartTime;
+
+            logger.error('LOOP_ACTION', '========== LOOP REQUEST FAILED ==========', {
+                error: errorMessage,
+                stack: errorStack,
+                totalDuration: `${totalDuration}ms`,
+                apiCallsCount: apiCalls.length,
+                toolCallsCount: toolCalls.length
+            });
+
             return {
                 success: false,
                 output: "",
                 error: `Agent execution failed: ${errorMessage}`,
-                toolCallsCount: 0
+                toolCallsCount
             };
         }
     },

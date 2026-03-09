@@ -286,7 +286,7 @@ export const PROJECT_ROOT = new InjectionToken<string>(`PROJECT_ROOT`)
 export const SHELL_SESSION_DIR = new InjectionToken<string>("SHELL_SESSION_DIR");
 export const SHELL_SESSION_FILE = new InjectionToken<string>("SHELL_SESSION_FILE");
 export const SHELL_PID_DIR = new InjectionToken<string>("SHELL_PID_DIR");
-export const SHELL_LOG_DIR = new InjectionToken<string>("SHELL_LOG_DIR");
+export const LOG_DIR = new InjectionToken<string>("SHELL_LOG_DIR");
 
 export const CURRENT_DIR = new InjectionToken<string>("CURRENT_DIR");
 
@@ -295,6 +295,19 @@ export const CURRENT_DIR = new InjectionToken<string>("CURRENT_DIR");
  */
 export const USER_PROMPT = new InjectionToken<string>("USER_PROMPT")
 export const SESSION_ID = new InjectionToken<string>(`SESSION_ID`)
+
+// ============================================================================
+// Session Logger Token
+// ============================================================================
+
+import type { SessionLogger } from "./core/session-logger.js";
+
+/**
+ * SessionLogger 注入令牌
+ *
+ * 用于注入当前会话的日志记录器实例
+ */
+export const SESSION_LOGGER = new InjectionToken<SessionLogger>("SESSION_LOGGER");
 // ============================================================================
 // Scheduler 相关 Token
 // ============================================================================

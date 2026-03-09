@@ -14,7 +14,9 @@
     ],
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
-    "jsx": "preserve",
+    "jsx": "react",
+    "jsxFactory": "jsx.jsx",
+    "jsxFragmentFactory": "jsx.jsxFragment",
     "skipLibCheck": true
   },
   "include": [

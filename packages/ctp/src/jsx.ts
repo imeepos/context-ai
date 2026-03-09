@@ -16,7 +16,7 @@ export function jsx(
     normalizedProps.children = children;
   }
 
-  const key = normalizedProps.key as string | number | undefined;
+  const key = normalizedProps.key as string | null;
   if ('key' in normalizedProps) {
     delete normalizedProps.key;
   }
