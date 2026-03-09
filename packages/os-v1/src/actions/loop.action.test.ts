@@ -77,7 +77,7 @@ describe('loop.action', () => {
             return;
         }
 
-        const testPage = pages[0];
+        const testPage = pages[0]!;
 
         // 执行 loop action
         const result = await actionExecuter.execute(
@@ -134,7 +134,7 @@ describe('loop.action', () => {
                 prompt: Type.String()
             }),
             factory: async (props, injector) => {
-                return <system>You are a helpful assistant. Respond briefly.</system>;
+                return <system>You are a helpful assistant.Respond briefly.</system>;
             }
         };
 
