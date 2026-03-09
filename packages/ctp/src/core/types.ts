@@ -45,6 +45,3 @@ export interface JSXElement {
   key?: string | number;
 }
 
-export type RouteHandler = (
-  params?: Record<string, unknown>
-) => JSXElement | Promise<JSXElement>;

@@ -12,7 +12,21 @@ export * from './kernel/logger.js'
 export * from './kernel/metrics.js'
 export * from './kernel/tool-adapter.js'
 export * from './kernel/resource-governor.js'
-export * from './app-manager/index.js'
+export type {
+	AppStartResponse,
+	RouteRenderRequest,
+	RouteRenderResponse,
+	RuntimeRiskConfirmRequest,
+	RuntimeRiskConfirmResponse,
+	RuntimeToolsValidateRequest,
+	RuntimeToolsValidateResponse,
+} from './app-manager/index.js'
+export {
+	AppManager,
+	createAppInstallService,
+	createAppPageRenderService,
+	createAppUninstallService,
+} from './app-manager/index.js'
 export * from './file-service/index.js'
 export * from './shell-service/index.js'
 export * from './net-service/index.js'

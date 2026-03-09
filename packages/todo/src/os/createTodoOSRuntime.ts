@@ -5,11 +5,11 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   createDefaultLLMOS,
-  type AppManifest,
+  type AppManifestV1,
   type OSContext,
 } from '@context-ai/os';
 import { render } from '@context-ai/ctp';
-import { createTodoAgent, subscribeTodoAgentEvents } from '@context-ai/agent';
+import { createAgent, subscribeAgentEvents } from '@context-ai/agent';
 import { createTodoContext } from '../context/createTodoContext.js';
 import { createTodoRepository } from '../todo/repository.js';
 import { createTodoService } from '../todo/service.js';
@@ -78,7 +78,7 @@ export async function createTodoOSRuntime(): Promise<TodoOSRuntime> {
     };
   }
 
-  async function installManifestIntoKernel(manifest: AppManifest): Promise<boolean> {
+  async function installManifestIntoKernel(manifest: AppManifestV1): Promise<boolean> {
     const listed = await os.kernel.execute<{ _: 'list' }, { apps: Array<{ id: string }> }>(
       'app.list',
       { _: 'list' },
@@ -142,8 +142,8 @@ export async function createTodoOSRuntime(): Promise<TodoOSRuntime> {
       todoService,
     });
     const ctx = await render(await createTodoContext(runtimeContext));
-    const agent = createTodoAgent(ctx.prompt, ctx.tools);
-    subscribeTodoAgentEvents(agent);
+    const agent = createAgent(ctx.prompt, ctx.tools);
+    subscribeAgentEvents(agent);
     await agent.prompt(prompt);
     await agent.waitForIdle();
 
@@ -165,7 +165,7 @@ export async function createTodoOSRuntime(): Promise<TodoOSRuntime> {
   };
 }
 
-function parseManifestXml(xml: string): AppManifest {
+function parseManifestXml(xml: string): AppManifestV1 {
   const appTag = matchFirst(xml, /<application\b([^>]*)>/i, 'application');
   const appAttrs = parseAttributes(appTag[1] ?? '');
   const id = requiredValue(appAttrs.id, 'application.id');

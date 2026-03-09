@@ -1,1071 +1,119 @@
-import { AppLifecycleManager, type AppLifecycleState } from "./lifecycle.js";
-import type { AppManifest, AppManifestV1, AppPageEntry } from "./manifest.js";
-import { normalizeManifest } from "./manifest.js";
-import { AppPermissionStore } from "./permissions.js";
-import { AppQuotaManager, type AppQuota } from "./quota.js";
-import { AppRegistry } from "./registry.js";
-import { AppRouteRegistry } from "./route-registry.js";
-import { OSError } from "../kernel/errors.js";
-import { createSystemInputExecute, createSystemInputView } from "../system-runtime-bridge.js";
-import {
-	APP_DISABLE,
-	APP_ENABLE,
-	APP_INSTALL,
-	APP_INSTALL_ROLLBACK,
-	APP_INSTALL_V1,
-	APP_LIST,
-	APP_PAGE_RENDER,
-	APP_START,
-	APP_STATE_SET,
-	APP_UNINSTALL,
-	APP_UPGRADE,
-	RENDER,
-	RUNTIME_RISK_CONFIRM,
-	RUNTIME_TOOLS_VALIDATE,
-} from "../tokens.js";
-import type { OSService, Token } from "../types/os.js";
-import type { SecurityService } from "../security-service/index.js";
-import { randomUUID } from "node:crypto";
-import type { JSXElement } from "@context-ai/ctp";
-import { createOSServiceClass } from "../os-service-class.js";
-
-export class AppManager {
-	readonly registry = new AppRegistry();
-	readonly lifecycle = new AppLifecycleManager();
-	readonly permissions = new AppPermissionStore();
-	readonly quota = new AppQuotaManager();
-	readonly routes = new AppRouteRegistry();
-	private readonly disabledApps = new Set<string>();
-	private readonly installReports = new Map<string, AppInstallReportState>();
-	private readonly rollbackSnapshots = new Map<
-		string,
-		{
-			appId: string;
-			previous?: AppManifestV1;
-			previousQuota?: AppQuota;
-			createdAt: string;
-			expiresAt: string;
-		}
-	>();
-	private static readonly MAX_ROLLBACK_SNAPSHOTS_PER_APP = 20;
-	private static readonly DEFAULT_ROLLBACK_TTL_MS = 24 * 60 * 60 * 1000;
-	private rollbackTokenTtlMs = AppManager.DEFAULT_ROLLBACK_TTL_MS;
-
-	install(manifest: AppManifest, quota?: AppQuota): void {
-		const normalized = normalizeManifest(manifest);
-		const alreadyInstalled = this.registry.has(normalized.id);
-		this.registry.install(manifest);
-		if (alreadyInstalled) {
-			this.routes.unregisterApp(normalized.id);
-		}
-		this.routes.register(normalized);
-		this.permissions.grant(manifest.id, manifest.permissions);
-		if (quota) {
-			this.quota.setQuota(manifest.id, quota);
-		}
-	}
-
-	upgrade(manifest: AppManifest): void {
-		if (!this.registry.has(manifest.id)) {
-			throw new OSError("E_APP_NOT_REGISTERED", `App not found: ${manifest.id}`);
-		}
-		this.registry.install(manifest);
-		const normalized = normalizeManifest(manifest);
-		this.routes.unregisterApp(manifest.id);
-		this.routes.register(normalized);
-		this.permissions.grant(manifest.id, manifest.permissions);
-	}
-
-	uninstall(appId: string): void {
-		this.registry.uninstall(appId);
-		this.routes.unregisterApp(appId);
-		this.lifecycle.reset(appId);
-		this.permissions.revokeAll(appId);
-		this.quota.reset(appId);
-		this.disabledApps.delete(appId);
-		this.installReports.delete(appId);
-		for (const [token, snapshot] of this.rollbackSnapshots.entries()) {
-			if (snapshot.appId === appId) {
-				this.rollbackSnapshots.delete(token);
-			}
-		}
-	}
-
-	setState(appId: string, state: AppLifecycleState): AppLifecycleState {
-		return this.lifecycle.transition(appId, state);
-	}
-
-	disable(appId: string): void {
-		if (!this.registry.has(appId)) throw new OSError("E_APP_NOT_REGISTERED", `App not found: ${appId}`);
-		this.disabledApps.add(appId);
-	}
-
-	enable(appId: string): void {
-		if (!this.registry.has(appId)) throw new OSError("E_APP_NOT_REGISTERED", `App not found: ${appId}`);
-		this.disabledApps.delete(appId);
-	}
-
-	isEnabled(appId: string): boolean {
-		return this.registry.has(appId) && !this.disabledApps.has(appId);
-	}
-
-	setInstallReport(report: AppInstallDeltaReport, lastAction: "install" | "rollback" = "install"): void {
-		this.installReports.set(report.appId, {
-			report,
-			lastAction,
-			updatedAt: new Date().toISOString(),
-		});
-	}
-
-	getInstallReport(appId: string): AppInstallDeltaReport | undefined {
-		return this.installReports.get(appId)?.report;
-	}
-
-	getInstallReportState(appId: string): AppInstallReportState | undefined {
-		const state = this.installReports.get(appId);
-		if (!state) return undefined;
-		return {
-			report: {
-				...state.report,
-			},
-			lastAction: state.lastAction,
-			updatedAt: state.updatedAt,
-		};
-	}
-
-	setRollbackSnapshot(
-		rollbackToken: string,
-		snapshot: {
-			appId: string;
-			previous?: AppManifestV1;
-			previousQuota?: AppQuota;
-			createdAt?: string;
-			expiresAt?: string;
-		},
-	): void {
-		const createdAt = snapshot.createdAt ?? new Date().toISOString();
-		const expiresAt = snapshot.expiresAt ?? new Date(Date.now() + this.rollbackTokenTtlMs).toISOString();
-		this.rollbackSnapshots.set(rollbackToken, {
-			appId: snapshot.appId,
-			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
-			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
-			createdAt,
-			expiresAt,
-		});
-		this.pruneRollbackSnapshots(snapshot.appId);
-	}
-
-	consumeRollbackSnapshot(
-		rollbackToken: string,
-		options?: { appId?: string },
-	): { appId: string; previous?: AppManifestV1; previousQuota?: AppQuota } | undefined {
-		const snapshot = this.rollbackSnapshots.get(rollbackToken);
-		if (!snapshot) return undefined;
-		const expiresAt = Date.parse(snapshot.expiresAt);
-		if (!Number.isNaN(expiresAt) && expiresAt <= Date.now()) {
-			this.rollbackSnapshots.delete(rollbackToken);
-			return undefined;
-		}
-		if (options?.appId && snapshot.appId !== options.appId) {
-			return undefined;
-		}
-		this.rollbackSnapshots.delete(rollbackToken);
-		return {
-			appId: snapshot.appId,
-			previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
-			previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
-		};
-	}
-
-	setRollbackTokenTTL(ms: number): void {
-		if (!Number.isFinite(ms) || ms <= 0) {
-			throw new OSError("E_VALIDATION_FAILED", `Invalid rollback token TTL: ${ms}`);
-		}
-		this.rollbackTokenTtlMs = Math.floor(ms);
-	}
-
-	exportRollbackState(): {
-		snapshots: Array<{
-			token: string;
-			appId: string;
-			previous?: AppManifestV1;
-			previousQuota?: AppQuota;
-			createdAt: string;
-			expiresAt: string;
-		}>;
-		installReports: AppInstallReportState[];
-	} {
-		return {
-			snapshots: [...this.rollbackSnapshots.entries()].map(([token, snapshot]) => ({
-				token,
-				appId: snapshot.appId,
-				previous: snapshot.previous ? cloneManifest(snapshot.previous) : undefined,
-				previousQuota: snapshot.previousQuota ? { ...snapshot.previousQuota } : undefined,
-				createdAt: snapshot.createdAt,
-				expiresAt: snapshot.expiresAt,
-			})),
-			installReports: [...this.installReports.values()].map((state) => ({
-				report: { ...state.report },
-				lastAction: state.lastAction,
-				updatedAt: state.updatedAt,
-			})),
-		};
-	}
-
-	importRollbackState(input: {
-		snapshots: Array<{
-			token: string;
-			appId: string;
-			previous?: AppManifestV1;
-			previousQuota?: AppQuota;
-			createdAt: string;
-			expiresAt: string;
-		}>;
-		installReports: AppInstallReportState[];
-	}): void {
-		if (!input || typeof input !== "object") {
-			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: object required");
-		}
-		if (!Array.isArray(input.snapshots)) {
-			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshots must be array");
-		}
-		if (!Array.isArray(input.installReports)) {
-			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: installReports must be array");
-		}
-		const snapshots = (input.snapshots ?? []).map((snapshot) => {
-			validateRollbackSnapshot(snapshot);
-			return {
-				token: snapshot.token,
-				appId: snapshot.appId,
-				previous: snapshot.previous,
-				previousQuota: snapshot.previousQuota,
-				createdAt: snapshot.createdAt,
-				expiresAt: snapshot.expiresAt,
-			};
-		});
-		const snapshotTokenSet = new Set<string>();
-		for (const snapshot of snapshots) {
-			if (snapshotTokenSet.has(snapshot.token)) {
-				throw new OSError("E_VALIDATION_FAILED", `Invalid rollback state: duplicate snapshot token ${snapshot.token}`);
-			}
-			snapshotTokenSet.add(snapshot.token);
-		}
-		const reports = (input.installReports ?? []).map((state) => {
-			validateInstallReportState(state);
-			return {
-				report: { ...state.report },
-				lastAction: state.lastAction,
-				updatedAt: state.updatedAt,
-			};
-		});
-		const reportAppIdSet = new Set<string>();
-		for (const state of reports) {
-			if (reportAppIdSet.has(state.report.appId)) {
-				throw new OSError(
-					"E_VALIDATION_FAILED",
-					`Invalid rollback state: duplicate install report appId ${state.report.appId}`,
-				);
-			}
-			reportAppIdSet.add(state.report.appId);
-		}
-
-		this.rollbackSnapshots.clear();
-		this.installReports.clear();
-		for (const snapshot of snapshots) {
-			this.setRollbackSnapshot(snapshot.token, snapshot);
-		}
-		for (const reportState of reports) {
-			this.installReports.set(reportState.report.appId, reportState);
-		}
-	}
-
-	listRollbackSnapshots(appId?: string): Array<{
-		token: string;
-		appId: string;
-		createdAt: string;
-		expiresAt: string;
-	}> {
-		return [...this.rollbackSnapshots.entries()]
-			.filter(([, snapshot]) => !appId || snapshot.appId === appId)
-			.map(([token, snapshot]) => ({
-				token,
-				appId: snapshot.appId,
-				createdAt: snapshot.createdAt,
-				expiresAt: snapshot.expiresAt,
-			}));
-	}
-
-	garbageCollectExpiredRollbackSnapshots(now = Date.now()): { scanned: number; removed: number } {
-		const entries = [...this.rollbackSnapshots.entries()];
-		let removed = 0;
-		for (const [token, snapshot] of entries) {
-			const expiresAt = Date.parse(snapshot.expiresAt);
-			if (!Number.isNaN(expiresAt) && expiresAt <= now) {
-				this.rollbackSnapshots.delete(token);
-				removed += 1;
-			}
-		}
-		return {
-			scanned: entries.length,
-			removed,
-		};
-	}
-
-	private pruneRollbackSnapshots(appId: string): void {
-		const tokensForApp = [...this.rollbackSnapshots.entries()]
-			.filter(([, snapshot]) => snapshot.appId === appId)
-			.map(([token]) => token);
-		const overflow = tokensForApp.length - AppManager.MAX_ROLLBACK_SNAPSHOTS_PER_APP;
-		if (overflow <= 0) return;
-		for (const token of tokensForApp.slice(0, overflow)) {
-			this.rollbackSnapshots.delete(token);
-		}
-	}
-}
-
-export interface AppInstallRequest {
-	manifest: AppManifest;
-	quota?: AppQuota;
-	force?: boolean;
-}
-
-export interface AppInstallDeltaReport {
-	appId: string;
-	version: string;
-	addedPages: string[];
-	addedPolicies: string[];
-	addedObservability: string[];
-	rollbackToken: string;
-}
-
-export interface AppInstallReportState {
-	report: AppInstallDeltaReport;
-	lastAction: "install" | "rollback";
-	updatedAt: string;
-}
-
-export interface AppInstallRollbackRequest {
-	appId: string;
-	rollbackToken: string;
-}
-
-export interface AppUpgradeRequest {
-	manifest: AppManifest;
-}
-
-export interface AppInstallV1Request {
-	manifest: AppManifestV1;
-	quota?: AppQuota;
-	force?: boolean;
-	requireSignature?: boolean;
-	signingSecret?: string;
-}
-
-export interface AppSetStateRequest {
-	appId: string;
-	state: AppLifecycleState;
-}
-
-export interface AppManageRequest {
-	appId: string;
-}
-
-export interface AppStartRequest {
-	appId: string;
-	route?: string;
-}
-
-export interface AppListRequest {
-	readonly _: "list";
-}
-
-export interface AppServiceHooks {
-	onInstall?: (manifest: AppManifest) => void;
-	onUninstall?: (appId: string) => void;
-	onUpgrade?: (manifest: AppManifest) => void;
-	onRollback?: (input: {
-		appId: string;
-		rollbackToken: string;
-		restoredVersion?: string;
-		uninstalled: boolean;
-	}) => void;
-}
-
-export interface AppPageRenderer {
-	render(input: AppPageRenderInput): Promise<{
-		prompt: string;
-		tools: Array<{ name: string; description?: string; parameters?: unknown }>;
-		dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
-		metadata?: Record<string, string>;
-	}>;
-}
-
-export interface AppPageRenderContext {
-	appId: string;
-	sessionId: string;
-	permissions: string[];
-	workingDirectory: string;
-	traceId?: string;
-}
-
-export interface AppPageSystemRuntime {
-	execute<Request, Response, Name extends string>(
-		service: Token<Request, Response, Name>,
-		request: Request,
-		context: AppPageRenderContext,
-	): Promise<Response>;
-	execute<Request, Response>(service: string, request: Request, context: AppPageRenderContext): Promise<Response>;
-	listServices?(): string[];
-}
-
-export interface AppPageRenderInput {
-	appId: string;
-	page: AppPageEntry;
-	context: AppPageRenderContext;
-	system: {
-		execute<Request, Response, Name extends string>(
-			service: Token<Request, Response, Name>,
-			request: Request,
-			context: AppPageRenderContext,
-		): Promise<Response>;
-		services: string[];
-	};
-}
-
-function createPageSystemRuntime(
-	systemRuntime: AppPageSystemRuntime | undefined,
-	renderContext: AppPageRenderContext,
-): AppPageRenderInput["system"] {
-	return createSystemInputView(
-		createSystemInputExecute((service, request, context) => {
-			if (!systemRuntime) {
-				throw new OSError(
-					"E_SERVICE_NOT_FOUND",
-					`App page system runtime is not configured for service call: ${service}`,
-				);
-			}
-			return systemRuntime.execute(service, request, context ?? renderContext);
-		}),
-		systemRuntime?.listServices?.() ?? [],
-	);
-}
-
-export type PageResult = JSXElement | (() => JSXElement | Promise<JSXElement>);
-
-export type Page = (input: AppPageRenderInput) => PageResult | Promise<PageResult>;
-
-function buildManifestSigningPayload(manifest: AppManifestV1): string {
-	const pages = [...manifest.entry.pages]
-		.map((page) => ({
-			id: page.id,
-			route: page.route,
-			name: page.name,
-			description: page.description,
-			path: page.path,
-			tags: page.tags ?? [],
-			default: page.default ?? false,
-		}))
-		.sort((a, b) => a.route.localeCompare(b.route));
-	return JSON.stringify({
-		id: manifest.id,
-		name: manifest.name,
-		version: manifest.version,
-		pages,
-		permissions: [...manifest.permissions].sort(),
-	});
-}
-
-const diffAddedRoutes = (previous: AppManifestV1 | undefined, next: AppManifestV1): number => {
-	if (!previous) return next.entry.pages.length;
-	const previousRoutes = new Set(previous.entry.pages.map((item) => item.route));
-	return next.entry.pages.filter((item) => !previousRoutes.has(item.route)).length;
-};
-
-type RouteRenderRequest = { route: string };
-type RouteRenderResponse = {
-	appId: string;
-	page: AppPageEntry;
-	prompt: string;
-	tools: Array<{ name: string; description?: string; parameters?: unknown }>;
-	dataViews?: Array<{ title: string; format: string; fields?: string[] }>;
-	metadata?: Record<string, string>;
-};
-type AppStartResponse = RouteRenderResponse & { route: string };
-type RuntimeToolsValidateRequest = {
-	route: string;
-	tools: Array<{
-		name: string;
-		parameters?: unknown;
-		requiredPermissions?: string[];
-	}>;
-};
-type RuntimeToolsValidateResponse = {
-	valid: boolean;
-	issues: string[];
-};
-type RuntimeRiskConfirmRequest = {
-	riskLevel: "low" | "medium" | "high";
-	approved?: boolean;
-	approver?: string;
-	approvalExpiresAt?: string;
-};
-type RuntimeRiskConfirmResponse = {
-	allowed: boolean;
-	reason?: string;
-};
-
-async function executeAppInstall(
-	manager: AppManager,
-	hooks: AppServiceHooks | undefined,
-	req: AppInstallRequest,
-): Promise<{ ok: true; report: AppInstallDeltaReport }> {
-	const next = normalizeManifest(req.manifest);
-	const previous = manager.registry.has(next.id) ? manager.registry.get(next.id) : undefined;
-	const previousQuota = manager.quota.getQuota(next.id);
-	const addedRoutes = diffAddedRoutes(previous, next);
-	if (!req.force && addedRoutes === 0 && previous) {
-		throw new OSError("E_VALIDATION_FAILED", `No page delta for app.install: ${next.id}`);
-	}
-	manager.install(req.manifest, req.quota);
-	hooks?.onInstall?.(req.manifest);
-	const report: AppInstallDeltaReport = {
-		appId: next.id,
-		version: next.version,
-		addedPages: next.entry.pages
-			.map((page) => page.route)
-			.filter((route) => !previous?.entry.pages.some((item) => item.route === route)),
-		addedPolicies: next.permissions.filter((permission) => !previous?.permissions.includes(permission)),
-		addedObservability: [`audit:${next.id}`, `metrics:${next.id}`, `events:${next.id}`],
-		rollbackToken: `${next.id}@${next.version}:${randomUUID()}`,
-	};
-	manager.setInstallReport(report);
-	manager.setRollbackSnapshot(report.rollbackToken, {
-		appId: next.id,
-		previous,
-		previousQuota,
-	});
-	return { ok: true, report };
-}
-
-export const AppInstallOSService = createOSServiceClass(APP_INSTALL, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) => executeAppInstall(manager, hooks, req),
-});
-
-export function createAppInstallService(
-	manager: AppManager,
-	hooks?: AppServiceHooks,
-): OSService<AppInstallRequest, { ok: true; report: AppInstallDeltaReport }> {
-	return new AppInstallOSService(manager, hooks);
-}
-
-async function executeAppInstallRollback(
-	manager: AppManager,
-	hooks: AppServiceHooks | undefined,
-	req: AppInstallRollbackRequest,
-): Promise<{ ok: true; restoredVersion?: string; uninstalled: boolean }> {
-	const snapshot = manager.consumeRollbackSnapshot(req.rollbackToken, { appId: req.appId });
-	if (!snapshot) {
-		throw new OSError("E_VALIDATION_FAILED", `Invalid rollback token: ${req.rollbackToken}`);
-	}
-	if (snapshot.previous) {
-		manager.install(snapshot.previous);
-		manager.quota.reset(req.appId);
-		if (snapshot.previousQuota) {
-			manager.quota.setQuota(req.appId, snapshot.previousQuota);
-		}
-		manager.setInstallReport({
-			appId: snapshot.previous.id,
-			version: snapshot.previous.version,
-			addedPages: snapshot.previous.entry.pages.map((page) => page.route),
-			addedPolicies: [...snapshot.previous.permissions],
-			addedObservability: [
-				`audit:${snapshot.previous.id}`,
-				`metrics:${snapshot.previous.id}`,
-				`events:${snapshot.previous.id}`,
-			],
-			rollbackToken: req.rollbackToken,
-		}, "rollback");
-		hooks?.onInstall?.(snapshot.previous);
-		hooks?.onRollback?.({
-			appId: req.appId,
-			rollbackToken: req.rollbackToken,
-			restoredVersion: snapshot.previous.version,
-			uninstalled: false,
-		});
-		return {
-			ok: true,
-			restoredVersion: snapshot.previous.version,
-			uninstalled: false,
-		};
-	}
-	manager.uninstall(req.appId);
-	hooks?.onUninstall?.(req.appId);
-	hooks?.onRollback?.({
-		appId: req.appId,
-		rollbackToken: req.rollbackToken,
-		uninstalled: true,
-	});
-	return {
-		ok: true,
-		uninstalled: true,
-	};
-}
-
-export const AppInstallRollbackOSService = createOSServiceClass(APP_INSTALL_ROLLBACK, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) =>
-		executeAppInstallRollback(manager, hooks, req),
-});
-
-export function createAppInstallRollbackService(
-	manager: AppManager,
-	hooks?: AppServiceHooks,
-): OSService<AppInstallRollbackRequest, { ok: true; restoredVersion?: string; uninstalled: boolean }> {
-	return new AppInstallRollbackOSService(manager, hooks);
-}
-
-async function executeAppInstallV1(
-	manager: AppManager,
-	securityService: SecurityService,
-	hooks: AppServiceHooks | undefined,
-	req: AppInstallV1Request,
-): Promise<{ ok: true; report: AppInstallDeltaReport }> {
-	if (req.requireSignature) {
-		if (!req.manifest.signing?.signature) {
-			throw new OSError("E_VALIDATION_FAILED", `Manifest signing signature is required: ${req.manifest.id}`);
-		}
-		if (!req.signingSecret) {
-			throw new OSError("E_VALIDATION_FAILED", "Signing secret is required when requireSignature=true");
-		}
-		const payload = buildManifestSigningPayload(req.manifest);
-		const verified = securityService.verify(payload, req.signingSecret, req.manifest.signing.signature);
-		if (!verified) {
-			throw new OSError("E_POLICY_DENIED", `Invalid manifest signature: ${req.manifest.id}@${req.manifest.version}`);
-		}
-	}
-	return executeAppInstall(manager, hooks, {
-		manifest: req.manifest,
-		quota: req.quota,
-		force: req.force,
-	});
-}
-
-export const AppInstallV1OSService = createOSServiceClass(APP_INSTALL_V1, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager, securityService, hooks]: [AppManager, SecurityService, AppServiceHooks | undefined], req) =>
-		executeAppInstallV1(manager, securityService, hooks, req),
-});
-
-export function createAppInstallV1Service(
-	manager: AppManager,
-	securityService: SecurityService,
-	hooks?: AppServiceHooks,
-): OSService<AppInstallV1Request, { ok: true; report: AppInstallDeltaReport }> {
-	return new AppInstallV1OSService(manager, securityService, hooks);
-}
-
-function executeAppUpgrade(
-	manager: AppManager,
-	hooks: AppServiceHooks | undefined,
-	req: AppUpgradeRequest,
-): { ok: true } {
-	manager.upgrade(req.manifest);
-	hooks?.onUpgrade?.(req.manifest);
-	return { ok: true };
-}
-
-export const AppUpgradeOSService = createOSServiceClass(APP_UPGRADE, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) =>
-		executeAppUpgrade(manager, hooks, req),
-});
-
-export function createAppUpgradeService(
-	manager: AppManager,
-	hooks?: AppServiceHooks,
-): OSService<AppUpgradeRequest, { ok: true }> {
-	return new AppUpgradeOSService(manager, hooks);
-}
-
-export const AppSetStateOSService = createOSServiceClass(APP_STATE_SET, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager]: [AppManager], req) => ({
-		state: manager.setState(req.appId, req.state),
-	}),
-});
-
-export function createAppSetStateService(manager: AppManager): OSService<AppSetStateRequest, { state: AppLifecycleState }> {
-	return new AppSetStateOSService(manager);
-}
-
-export const AppListOSService = createOSServiceClass(APP_LIST, {
-	requiredPermissions: ["app:read"],
-	execute: ([manager]: [AppManager]) => ({
-		apps: manager.registry.list(),
-	}),
-});
-
-export function createAppListService(manager: AppManager): OSService<AppListRequest, { apps: AppManifest[] }> {
-	return new AppListOSService(manager);
-}
-
-function executeAppUninstall(
-	manager: AppManager,
-	hooks: AppServiceHooks | undefined,
-	req: AppManageRequest,
-): { ok: true } {
-	manager.uninstall(req.appId);
-	hooks?.onUninstall?.(req.appId);
-	return { ok: true };
-}
-
-export const AppUninstallOSService = createOSServiceClass(APP_UNINSTALL, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager, hooks]: [AppManager, AppServiceHooks | undefined], req) =>
-		executeAppUninstall(manager, hooks, req),
-});
-
-export function createAppUninstallService(
-	manager: AppManager,
-	hooks?: AppServiceHooks,
-): OSService<AppManageRequest, { ok: true }> {
-	return new AppUninstallOSService(manager, hooks);
-}
-
-export const AppDisableOSService = createOSServiceClass(APP_DISABLE, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager]: [AppManager], req) => {
-		manager.disable(req.appId);
-		return { ok: true as const };
-	},
-});
-
-export function createAppDisableService(manager: AppManager): OSService<AppManageRequest, { ok: true }> {
-	return new AppDisableOSService(manager);
-}
-
-export const AppEnableOSService = createOSServiceClass(APP_ENABLE, {
-	requiredPermissions: ["app:manage"],
-	execute: ([manager]: [AppManager], req) => {
-		manager.enable(req.appId);
-		return { ok: true as const };
-	},
-});
-
-export function createAppEnableService(manager: AppManager): OSService<AppManageRequest, { ok: true }> {
-	return new AppEnableOSService(manager);
-}
-
-export const AppPageRenderOSService = createOSServiceClass(APP_PAGE_RENDER, {
-	requiredPermissions: ["app:read"],
-	execute: ([manager, renderer, systemRuntime]: [AppManager, AppPageRenderer, AppPageSystemRuntime | undefined], req, ctx) =>
-		createRouteRenderService(APP_PAGE_RENDER, manager, renderer, systemRuntime).execute(req, ctx),
-});
-
-export function createAppPageRenderService(
-	manager: AppManager,
-	renderer: AppPageRenderer,
-	systemRuntime?: AppPageSystemRuntime,
-): OSService<RouteRenderRequest, RouteRenderResponse> {
-	return new AppPageRenderOSService(manager, renderer, systemRuntime);
-}
-
-export const RenderOSService = createOSServiceClass(RENDER, {
-	requiredPermissions: ["app:read"],
-	execute: ([manager, renderer, systemRuntime]: [AppManager, AppPageRenderer, AppPageSystemRuntime | undefined], req, ctx) =>
-		createRouteRenderService(RENDER, manager, renderer, systemRuntime).execute(req, ctx),
-});
-
-export function createRenderService(
-	manager: AppManager,
-	renderer: AppPageRenderer,
-	systemRuntime?: AppPageSystemRuntime,
-): OSService<RouteRenderRequest, RouteRenderResponse> {
-	return new RenderOSService(manager, renderer, systemRuntime);
-}
-
-function createRouteRenderService(
-	name: typeof APP_PAGE_RENDER | typeof RENDER,
-	manager: AppManager,
-	renderer: AppPageRenderer,
-	systemRuntime?: AppPageSystemRuntime,
-): OSService<RouteRenderRequest, RouteRenderResponse> {
-	return {
-		name,
-		requiredPermissions: ["app:read"],
-		execute: async (req, ctx) => {
-			const resolved = manager.routes.resolve(req.route);
-			if (!manager.isEnabled(resolved.appId)) {
-				manager.routes.recordRender(req.route, {
-					success: false,
-					error: `App is disabled: ${resolved.appId}`,
-				});
-				throw new OSError("E_APP_NOT_REGISTERED", `App is disabled: ${resolved.appId}`);
-			}
-			try {
-				const renderContext: AppPageRenderContext = {
-					appId: resolved.appId,
-					sessionId: ctx.sessionId,
-					permissions: ctx.permissions,
-					workingDirectory: ctx.workingDirectory,
-					traceId: ctx.traceId,
-				};
-				const rendered = await renderer.render({
-					appId: resolved.appId,
-					page: resolved.page,
-					context: renderContext,
-					system: createPageSystemRuntime(systemRuntime, renderContext),
-				});
-				manager.routes.recordRender(req.route, { success: true });
-				return {
-					appId: resolved.appId,
-					page: resolved.page,
-					prompt: rendered.prompt,
-					tools: rendered.tools,
-					dataViews: rendered.dataViews,
-					metadata: rendered.metadata,
-				};
-			} catch (error) {
-				manager.routes.recordRender(req.route, {
-					success: false,
-					error: error instanceof Error ? error.message : String(error),
-				});
-				throw error;
-			}
-		},
-	};
-}
-
-async function executeAppStart(
-	manager: AppManager,
-	renderer: AppPageRenderer,
-	systemRuntime: AppPageSystemRuntime | undefined,
-	req: AppStartRequest,
-	ctx: AppPageRenderContext,
-): Promise<AppStartResponse> {
-	const manifest = manager.registry.get(req.appId);
-	if (!manager.isEnabled(req.appId)) {
-		throw new OSError("E_APP_NOT_REGISTERED", `App is disabled: ${req.appId}`);
-	}
-	const route = req.route ?? manifest.entry.pages.find((page) => page.default)?.route ?? manifest.entry.pages[0]?.route;
-	if (!route) {
-		throw new OSError("E_VALIDATION_FAILED", `No page route found for app: ${req.appId}`);
-	}
-	const resolved = manager.routes.resolve(route);
-	if (resolved.appId !== req.appId) {
-		throw new OSError("E_VALIDATION_FAILED", `Route ${route} does not belong to app ${req.appId}`);
-	}
-	try {
-		const renderContext: AppPageRenderContext = {
-			appId: resolved.appId,
-			sessionId: ctx.sessionId,
-			permissions: ctx.permissions,
-			workingDirectory: ctx.workingDirectory,
-			traceId: ctx.traceId,
-		};
-		const rendered = await renderer.render({
-			appId: resolved.appId,
-			page: resolved.page,
-			context: renderContext,
-			system: createPageSystemRuntime(systemRuntime, renderContext),
-		});
-		ensureRunningState(manager, req.appId);
-		manager.routes.recordRender(route, { success: true });
-		return {
-			appId: resolved.appId,
-			route,
-			page: resolved.page,
-			prompt: rendered.prompt,
-			tools: rendered.tools,
-			dataViews: rendered.dataViews,
-			metadata: rendered.metadata,
-		};
-	} catch (error) {
-		manager.routes.recordRender(route, {
-			success: false,
-			error: error instanceof Error ? error.message : String(error),
-		});
-		throw error;
-	}
-}
-
-export const AppStartOSService = createOSServiceClass(APP_START, {
-	requiredPermissions: ["app:read"],
-	execute: ([manager, renderer, systemRuntime]: [AppManager, AppPageRenderer, AppPageSystemRuntime | undefined], req, ctx) =>
-		executeAppStart(manager, renderer, systemRuntime, req, ctx),
-});
-
-export function createAppStartService(
-	manager: AppManager,
-	renderer: AppPageRenderer,
-	systemRuntime?: AppPageSystemRuntime,
-): OSService<AppStartRequest, AppStartResponse> {
-	return new AppStartOSService(manager, renderer, systemRuntime);
-}
-
-function ensureRunningState(manager: AppManager, appId: string): void {
-	const current = manager.lifecycle.getState(appId);
-	if (current === "running") return;
-	if (current === "suspended") {
-		manager.setState(appId, "running");
-		return;
-	}
-	if (current === "installed" || current === "stopped") {
-		manager.setState(appId, "resolved");
-	}
-	if (manager.lifecycle.getState(appId) === "resolved") {
-		manager.setState(appId, "active");
-	}
-	if (manager.lifecycle.getState(appId) === "active") {
-		manager.setState(appId, "running");
-	}
-}
-
-function validateRuntimeTools(
-	manager: AppManager,
-	req: RuntimeToolsValidateRequest,
-): RuntimeToolsValidateResponse {
-	const resolved = manager.routes.resolve(req.route);
-	const manifest = manager.registry.get(resolved.appId);
-	const grantedPermissions = new Set(manifest.permissions);
-	const issues: string[] = [];
-	const seen = new Set<string>();
-	for (const tool of req.tools) {
-		if (!tool.name?.trim()) {
-			issues.push("tool.name is required");
-		} else if (seen.has(tool.name)) {
-			issues.push(`duplicate tool name: ${tool.name}`);
-		} else {
-			seen.add(tool.name);
-		}
-		if (tool.parameters !== undefined) {
-			const isObjectSchema =
-				typeof tool.parameters === "object" && tool.parameters !== null && !Array.isArray(tool.parameters);
-			if (!isObjectSchema) {
-				issues.push(`invalid parameters schema: ${tool.name || "unknown"}`);
-			}
-		}
-		for (const permission of tool.requiredPermissions ?? []) {
-			if (!grantedPermissions.has(permission)) {
-				issues.push(`permission mismatch: ${tool.name || "unknown"} requires ${permission}`);
-			}
-		}
-	}
-	return {
-		valid: issues.length === 0,
-		issues,
-	};
-}
-
-export const RuntimeToolsValidateOSService = createOSServiceClass(RUNTIME_TOOLS_VALIDATE, {
-	requiredPermissions: ["app:read"],
-	execute: ([manager]: [AppManager], req) => validateRuntimeTools(manager, req),
-});
-
-export function createRuntimeToolsValidateService(
-	manager: AppManager,
-): OSService<RuntimeToolsValidateRequest, RuntimeToolsValidateResponse> {
-	return new RuntimeToolsValidateOSService(manager);
-}
-
-function confirmRuntimeRisk(req: RuntimeRiskConfirmRequest): RuntimeRiskConfirmResponse {
-	if (req.riskLevel === "low") {
-		return { allowed: true };
-	}
-	if (!req.approved) {
-		return { allowed: false, reason: "approval_required" };
-	}
-	if (!req.approver?.trim()) {
-		return { allowed: false, reason: "approver_required" };
-	}
-	if (req.riskLevel === "high") {
-		if (!req.approvalExpiresAt) {
-			return { allowed: false, reason: "approval_expires_at_required" };
-		}
-		const expires = Date.parse(req.approvalExpiresAt);
-		if (Number.isNaN(expires) || expires <= Date.now()) {
-			return { allowed: false, reason: "approval_expired" };
-		}
-	}
-	return { allowed: true };
-}
-
-export const RuntimeRiskConfirmOSService = createOSServiceClass(RUNTIME_RISK_CONFIRM, {
-	requiredPermissions: ["app:read"],
-	execute: (_dependencies: [], req) => confirmRuntimeRisk(req),
-});
-
-export function createRuntimeRiskConfirmService(): OSService<RuntimeRiskConfirmRequest, RuntimeRiskConfirmResponse> {
-	return new RuntimeRiskConfirmOSService();
-}
-
-export type { AppManifest } from "./manifest.js";
+// Core exports
+export { AppManager } from "./manager.js";
+
+// Type exports
+export type {
+	AppInstallRequest,
+	AppInstallDeltaReport,
+	AppInstallReportState,
+	AppInstallRollbackRequest,
+	AppUpgradeRequest,
+	AppInstallV1Request,
+	AppSetStateRequest,
+	AppManageRequest,
+	AppStartRequest,
+	AppListRequest,
+	AppServiceHooks,
+	AppPageRenderer,
+	AppPageRenderContext,
+	AppPageSystemRuntime,
+	AppPageRenderInput,
+	PageResult,
+	Page,
+	RouteRenderRequest,
+	RouteRenderResponse,
+	AppStartResponse,
+	RuntimeToolsValidateRequest,
+	RuntimeToolsValidateResponse,
+	RuntimeRiskConfirmRequest,
+	RuntimeRiskConfirmResponse,
+	RollbackSnapshot,
+	RollbackSnapshotEntry,
+	ExportedRollbackState,
+	ImportRollbackStateInput,
+} from "./types.js";
+
+// Re-export types from sub-modules
+export type { AppManifest, AppManifestV1, AppPageEntry } from "./manifest.js";
 export type { AppLifecycleState } from "./lifecycle.js";
 export type { AppQuota } from "./quota.js";
 
-function cloneManifest(manifest: AppManifestV1): AppManifestV1 {
-	return JSON.parse(JSON.stringify(manifest)) as AppManifestV1;
-}
+// Service factories - Install
+export {
+	executeAppInstall,
+	AppInstallOSService,
+	createAppInstallService,
+	AppInstallV1OSService,
+	createAppInstallV1Service,
+} from "./services/index.js";
 
-function validateIsoTimestamp(value: string, field: string): void {
-	if (typeof value !== "string" || Number.isNaN(Date.parse(value))) {
-		throw new OSError("E_VALIDATION_FAILED", `Invalid rollback state: ${field} must be ISO datetime string`);
-	}
-}
+// Service factories - Rollback
+export {
+	executeAppInstallRollback,
+	AppInstallRollbackOSService,
+	createAppInstallRollbackService,
+} from "./services/index.js";
 
-function validateRollbackSnapshot(snapshot: {
-	token: string;
-	appId: string;
-	createdAt: string;
-	expiresAt: string;
-	previous?: AppManifestV1;
-	previousQuota?: AppQuota;
-}): void {
-	if (!snapshot || typeof snapshot !== "object") {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot object required");
-	}
-	if (typeof snapshot.token !== "string" || snapshot.token.trim().length === 0) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.token required");
-	}
-	if (typeof snapshot.appId !== "string" || snapshot.appId.trim().length === 0) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.appId required");
-	}
-	validateIsoTimestamp(snapshot.createdAt, "snapshot.createdAt");
-	validateIsoTimestamp(snapshot.expiresAt, "snapshot.expiresAt");
-	if (Date.parse(snapshot.expiresAt) <= Date.parse(snapshot.createdAt)) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.expiresAt must be after createdAt");
-	}
-	if (snapshot.previous) {
-		normalizeManifest(snapshot.previous);
-	}
-	if (snapshot.previousQuota) {
-		const { maxTokens, maxToolCalls } = snapshot.previousQuota;
-		if (!Number.isFinite(maxTokens) || maxTokens <= 0 || !Number.isFinite(maxToolCalls) || maxToolCalls <= 0) {
-			throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: snapshot.previousQuota invalid");
-		}
-	}
-}
+// Service factories - Upgrade
+export {
+	executeAppUpgrade,
+	AppUpgradeOSService,
+	createAppUpgradeService,
+} from "./services/index.js";
 
-function validateInstallReportState(state: AppInstallReportState): void {
-	if (!state || typeof state !== "object" || !state.report) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: install report object required");
-	}
-	if (state.lastAction !== "install" && state.lastAction !== "rollback") {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: install report lastAction invalid");
-	}
-	validateIsoTimestamp(state.updatedAt, "installReport.updatedAt");
-	const report = state.report;
-	if (typeof report.appId !== "string" || report.appId.trim().length === 0) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report.appId required");
-	}
-	if (typeof report.version !== "string" || report.version.trim().length === 0) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report.version required");
-	}
-	if (!Array.isArray(report.addedPages) || !Array.isArray(report.addedPolicies) || !Array.isArray(report.addedObservability)) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report arrays required");
-	}
-	if (typeof report.rollbackToken !== "string" || report.rollbackToken.trim().length === 0) {
-		throw new OSError("E_VALIDATION_FAILED", "Invalid rollback state: report.rollbackToken required");
-	}
-}
+// Service factories - Uninstall
+export {
+	executeAppUninstall,
+	AppUninstallOSService,
+	createAppUninstallService,
+} from "./services/index.js";
+
+// Service factories - State
+export {
+	AppSetStateOSService,
+	createAppSetStateService,
+	AppDisableOSService,
+	createAppDisableService,
+	AppEnableOSService,
+	createAppEnableService,
+} from "./services/index.js";
+
+// Service factories - List
+export {
+	AppListOSService,
+	createAppListService,
+} from "./services/index.js";
+
+// Service factories - Manage (runtime validation)
+export {
+	validateRuntimeTools,
+	RuntimeToolsValidateOSService,
+	createRuntimeToolsValidateService,
+	confirmRuntimeRisk,
+	RuntimeRiskConfirmOSService,
+	createRuntimeRiskConfirmService,
+} from "./services/index.js";
+
+// Service factories - Render
+export {
+	AppPageRenderOSService,
+	createAppPageRenderService,
+	RenderOSService,
+	createRenderService,
+} from "./services/index.js";
+
+// Service factories - Start
+export {
+	executeAppStart,
+	AppStartOSService,
+	createAppStartService,
+} from "./services/index.js";
+
+// Rollback utilities
+export {
+	RollbackManager,
+	validateRollbackSnapshot,
+	validateInstallReportState,
+	MAX_ROLLBACK_SNAPSHOTS_PER_APP,
+	DEFAULT_ROLLBACK_TTL_MS,
+} from "./rollback.js";

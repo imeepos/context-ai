@@ -12,7 +12,6 @@ import {
 	createSystemAlertsHealthService,
 	createSystemAlertsHotspotsService,
 	createSystemAlertsIncidentsService,
-	createSystemAlertsPolicyService,
 	createSystemAlertsRecommendationsService,
 	createSystemAlertsReportCompactService,
 	createSystemAlertsReportService,
@@ -21,15 +20,11 @@ import {
 	createSystemAlertsStatsService,
 	createSystemAlertsTimelineService,
 	createSystemAlertsTopicsService,
-	createSystemAlertsTrendsService,
 	createSystemAlertsUnackedService,
 	createSystemSLOService,
-	createSystemSLORulesEvaluateService,
-	createSystemSLORulesListService,
-	createSystemSLORulesUpsertService,
 } from "../../system-service/index.js";
 import * as TOKENS from "../../tokens.js";
-import { OS_KERNEL, OS_NET, OS_NOTIFICATION, OS_SCHEDULER } from "../tokens.js";
+import { OS_KERNEL, OS_NOTIFICATION, OS_SCHEDULER } from "../tokens.js";
 import { createDelegatingOSServiceClass } from "./delegating-service.js";
 import { defineInjectableOSService } from "./definition.js";
 
@@ -62,16 +57,6 @@ export const SystemAlertsUnackedOSService = createDelegatingOSServiceClass(
 	TOKENS.SYSTEM_ALERTS_UNACKED,
 	["system:read"],
 	createSystemAlertsUnackedService,
-);
-export const SystemAlertsPolicyOSService = createDelegatingOSServiceClass(
-	TOKENS.SYSTEM_ALERTS_POLICY,
-	["system:read"],
-	createSystemAlertsPolicyService,
-);
-export const SystemAlertsTrendsOSService = createDelegatingOSServiceClass(
-	TOKENS.SYSTEM_ALERTS_TRENDS,
-	["system:read"],
-	createSystemAlertsTrendsService,
 );
 export const SystemAlertsSLOOSService = createDelegatingOSServiceClass(
 	TOKENS.SYSTEM_ALERTS_SLO,
@@ -158,21 +143,6 @@ export const SystemSLOOSService = createDelegatingOSServiceClass(
 	["system:read"],
 	createSystemSLOService,
 );
-export const SystemSLORulesUpsertOSService = createDelegatingOSServiceClass(
-	TOKENS.SYSTEM_SLO_RULES_UPSERT,
-	["system:write"],
-	createSystemSLORulesUpsertService,
-);
-export const SystemSLORulesListOSService = createDelegatingOSServiceClass(
-	TOKENS.SYSTEM_SLO_RULES_LIST,
-	["system:read"],
-	createSystemSLORulesListService,
-);
-export const SystemSLORulesEvaluateOSService = createDelegatingOSServiceClass(
-	TOKENS.SYSTEM_SLO_RULES_EVALUATE,
-	["system:read"],
-	createSystemSLORulesEvaluateService,
-);
 
 export const SYSTEM_ALERTS_SERVICE_DEFINITIONS = [
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS, SystemAlertsOSService, [OS_NOTIFICATION] as const),
@@ -181,8 +151,6 @@ export const SYSTEM_ALERTS_SERVICE_DEFINITIONS = [
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_STATS, SystemAlertsStatsOSService, [OS_NOTIFICATION] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_TOPICS, SystemAlertsTopicsOSService, [OS_NOTIFICATION] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_UNACKED, SystemAlertsUnackedOSService, [OS_NOTIFICATION] as const),
-	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_POLICY, SystemAlertsPolicyOSService, [OS_NOTIFICATION] as const),
-	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_TRENDS, SystemAlertsTrendsOSService, [OS_NOTIFICATION] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_SLO, SystemAlertsSLOOSService, [OS_NOTIFICATION] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_INCIDENTS, SystemAlertsIncidentsOSService, [OS_NOTIFICATION] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_DIGEST, SystemAlertsDigestOSService, [OS_NOTIFICATION] as const),
@@ -196,11 +164,8 @@ export const SYSTEM_ALERTS_SERVICE_DEFINITIONS = [
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_BACKLOG, SystemAlertsBacklogOSService, [OS_NOTIFICATION] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_BREACHES, SystemAlertsBreachesOSService, [OS_NOTIFICATION] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_HEALTH, SystemAlertsHealthOSService, [OS_NOTIFICATION] as const),
-	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_PLAN, SystemAlertsAutoRemediatePlanOSService, [OS_NOTIFICATION, OS_SCHEDULER, OS_NET] as const),
-	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_EXECUTE, SystemAlertsAutoRemediateExecuteOSService, [OS_NOTIFICATION, OS_SCHEDULER, OS_NET] as const),
+	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_PLAN, SystemAlertsAutoRemediatePlanOSService, [OS_NOTIFICATION, OS_SCHEDULER] as const),
+	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_EXECUTE, SystemAlertsAutoRemediateExecuteOSService, [OS_NOTIFICATION, OS_SCHEDULER] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_ALERTS_AUTO_REMEDIATE_AUDIT, SystemAlertsAutoRemediateAuditOSService, [] as const),
 	defineInjectableOSService(TOKENS.SYSTEM_SLO, SystemSLOOSService, [OS_KERNEL, OS_NOTIFICATION] as const),
-	defineInjectableOSService(TOKENS.SYSTEM_SLO_RULES_UPSERT, SystemSLORulesUpsertOSService, [] as const),
-	defineInjectableOSService(TOKENS.SYSTEM_SLO_RULES_LIST, SystemSLORulesListOSService, [] as const),
-	defineInjectableOSService(TOKENS.SYSTEM_SLO_RULES_EVALUATE, SystemSLORulesEvaluateOSService, [OS_KERNEL, OS_NOTIFICATION] as const),
 ] as const;
