@@ -3,6 +3,6 @@
 export default {
     name: 'demo',
     description: 'Demo',
-    main: './main.ts',
+    main: './main',
     version: `1.0.0`
 }
