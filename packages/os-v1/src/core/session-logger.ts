@@ -1,5 +1,8 @@
 import { appendFileSync, mkdirSync, existsSync } from "fs";
 import { dirname, join } from "path";
+import { Injectable, Inject } from "@context-ai/core";
+import type { OnDestroy } from "@context-ai/core";
+import { LOG_DIR, SESSION_ID } from "../tokens.js";
 
 export interface LogEntry {
     timestamp: string;
@@ -14,12 +17,19 @@ export interface LogEntry {
  *
  * 负责将指定 SESSION_ID 的所有日志写入对应的日志文件。
  * 日志文件路径: LOG_DIR/SESSION_ID.log
+ *
+ * 使用依赖注入，在销毁时自动调用 endSession
  */
-export class SessionLogger {
+@Injectable()
+export class SessionLogger implements OnDestroy {
     private logFilePath: string;
     private sessionId: string;
+    private ended = false;
 
-    constructor(logDir: string, sessionId: string) {
+    constructor(
+        @Inject(LOG_DIR) logDir: string,
+        @Inject(SESSION_ID) sessionId: string,
+    ) {
         this.sessionId = sessionId;
         this.logFilePath = join(logDir, `${sessionId}.log`);
 
@@ -31,6 +41,15 @@ export class SessionLogger {
 
         // 写入会话开始标记
         this.writeSeparator('SESSION START');
+    }
+
+    /**
+     * 生命周期：销毁时自动结束会话
+     */
+    onDestroy(): void {
+        if (!this.ended) {
+            this.endSession();
+        }
     }
 
     private formatEntry(entry: LogEntry): string {

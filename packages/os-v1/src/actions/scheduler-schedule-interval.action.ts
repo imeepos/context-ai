@@ -1,7 +1,8 @@
 import { Type, type Static } from "@sinclair/typebox";
-import type { Action, Token } from "../tokens.js";
+import type { Action, ActionExecuter, Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
 import { SchedulerService } from "../core/scheduler.js";
+import { ACTION_EXECUTER } from "../tokens.js";
 
 // ============================================================================
 // Scheduler Schedule Interval Action - 请求/响应 Schema 定义
@@ -15,10 +16,10 @@ export const SchedulerScheduleIntervalRequestSchema = Type.Object({
 	id: Type.String({ description: "Unique task identifier" }),
 	/** 间隔时间（毫秒） */
 	intervalMs: Type.Number({ description: "Interval in milliseconds between executions" }),
-	/** 事件主题 */
-	topic: Type.String({ description: "Event topic to publish on each execution" }),
-	/** 事件负载（可选） */
-	payload: Type.Optional(Type.Unknown({ description: "Event payload data" })),
+	/** 要执行的 Action token */
+	actionToken: Type.String({ description: "Action token to execute on each interval" }),
+	/** Action 请求参数（可选） */
+	actionParams: Type.Optional(Type.Unknown({ description: "Parameters to pass to the action" })),
 	/** 最大执行次数（可选） */
 	maxRuns: Type.Optional(Type.Number({ description: "Maximum number of executions (unlimited if not specified)" })),
 });
@@ -61,21 +62,21 @@ export const SCHEDULER_WRITE_PERMISSION: string = "scheduler:write";
 /**
  * 调度间隔任务 Action
  *
- * 核心能力：按固定间隔重复执行任务，发布事件到事件总线。
+ * 核心能力：按固定间隔重复执行指定的 Action。
  *
  * 设计要点：
  * - 使用 TypeBox 定义 Schema
  * - 权限控制：需要 scheduler:write 权限
  * - 任务持久化：支持状态恢复
  * - 可选限制：支持最大执行次数
- * - 事件驱动：每次执行时发布事件
  *
  * 使用方式:
  * const result = await actionExecuter.execute(SCHEDULER_SCHEDULE_INTERVAL_TOKEN, {
- *     id: 'task-2',
- *     intervalMs: 60000,
- *     topic: 'system.heartbeat',
- *     maxRuns: 10
+ *     id: 'hourly-report',
+ *     intervalMs: 3600000,  // 1 hour
+ *     actionToken: 'loop.request',
+ *     actionParams: { path: 'apps://list', prompt: '生成报告' },
+ *     maxRuns: 24  // 执行 24 次后停止
  * });
  */
 export const schedulerScheduleIntervalAction: Action<
@@ -83,7 +84,7 @@ export const schedulerScheduleIntervalAction: Action<
 	typeof SchedulerScheduleIntervalResponseSchema
 > = {
 	type: SCHEDULER_SCHEDULE_INTERVAL_TOKEN,
-	description: "Schedule a recurring task that executes at fixed intervals",
+	description: "Schedule a recurring task that executes an Action at fixed intervals",
 	request: SchedulerScheduleIntervalRequestSchema,
 	response: SchedulerScheduleIntervalResponseSchema,
 	requiredPermissions: [SCHEDULER_WRITE_PERMISSION],
@@ -93,9 +94,9 @@ export const schedulerScheduleIntervalAction: Action<
 		injector: Injector,
 	): Promise<SchedulerScheduleIntervalResponse> => {
 		const scheduler = injector.get(SchedulerService);
-		scheduler.scheduleEventInterval(params.id, params.intervalMs, params.topic, params.payload, {
-			maxRuns: params.maxRuns,
-		});
+		const actionExecuter = injector.get<ActionExecuter>(ACTION_EXECUTER);
+		const options = params.maxRuns !== undefined ? { maxRuns: params.maxRuns } : undefined;
+		scheduler.scheduleActionInterval(params.id, params.intervalMs, params.actionToken, params.actionParams, injector, actionExecuter, options);
 		return { scheduled: true };
 	},
 };

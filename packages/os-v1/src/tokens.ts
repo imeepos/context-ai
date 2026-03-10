@@ -301,6 +301,7 @@ export const SESSION_ID = new InjectionToken<string>(`SESSION_ID`)
 // ============================================================================
 
 import type { SessionLogger } from "./core/session-logger.js";
+import type { SchedulerService } from "./core/scheduler.js";
 
 /**
  * SessionLogger 注入令牌
@@ -308,6 +309,13 @@ import type { SessionLogger } from "./core/session-logger.js";
  * 用于注入当前会话的日志记录器实例
  */
 export const SESSION_LOGGER = new InjectionToken<SessionLogger>("SESSION_LOGGER");
+
+/**
+ * SchedulerService 注入令牌
+ *
+ * 用于注入调度器服务实例，支持任务调度管理
+ */
+export const SCHEDULER_SERVICE = new InjectionToken<SchedulerService>("SCHEDULER_SERVICE");
 // ============================================================================
 // Scheduler 相关 Token
 // ============================================================================

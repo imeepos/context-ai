@@ -1,7 +1,8 @@
 import { Type, type Static } from "@sinclair/typebox";
-import type { Action, Token } from "../tokens.js";
+import type { Action, ActionExecuter, Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
 import { SchedulerService } from "../core/scheduler.js";
+import { ACTION_EXECUTER } from "../tokens.js";
 
 // ============================================================================
 // Scheduler Schedule Once Action - 请求/响应 Schema 定义
@@ -15,10 +16,10 @@ export const SchedulerScheduleOnceRequestSchema = Type.Object({
 	id: Type.String({ description: "Unique task identifier" }),
 	/** 延迟时间（毫秒） */
 	delayMs: Type.Number({ description: "Delay in milliseconds before execution" }),
-	/** 事件主题 */
-	topic: Type.String({ description: "Event topic to publish when task executes" }),
-	/** 事件负载（可选） */
-	payload: Type.Optional(Type.Unknown({ description: "Event payload data" })),
+	/** 要执行的 Action token */
+	actionToken: Type.String({ description: "Action token to execute when task triggers" }),
+	/** Action 请求参数（可选） */
+	actionParams: Type.Optional(Type.Unknown({ description: "Parameters to pass to the action" })),
 });
 
 /** 调度一次性任务请求 TypeScript 类型 */
@@ -59,20 +60,20 @@ export const SCHEDULER_WRITE_PERMISSION: string = "scheduler:write";
 /**
  * 调度一次性任务 Action
  *
- * 核心能力：在指定延迟后执行一次任务，发布事件到事件总线。
+ * 核心能力：在指定延迟后执行一次 Action。
  *
  * 设计要点：
  * - 使用 TypeBox 定义 Schema
  * - 权限控制：需要 scheduler:write 权限
  * - 任务持久化：支持状态恢复
- * - 事件驱动：执行时发布事件
+ * - Action 执行：通过 ActionExecuter 执行指定的 Action
  *
  * 使用方式:
  * const result = await actionExecuter.execute(SCHEDULER_SCHEDULE_ONCE_TOKEN, {
  *     id: 'task-1',
  *     delayMs: 5000,
- *     topic: 'user.notification',
- *     payload: { message: 'Hello' }
+ *     actionToken: 'loop.request',
+ *     actionParams: { path: 'apps://list', prompt: '生成报告' }
  * });
  */
 export const schedulerScheduleOnceAction: Action<
@@ -80,14 +81,15 @@ export const schedulerScheduleOnceAction: Action<
 	typeof SchedulerScheduleOnceResponseSchema
 > = {
 	type: SCHEDULER_SCHEDULE_ONCE_TOKEN,
-	description: "Schedule a one-time task that executes after a specified delay",
+	description: "Schedule a one-time task that executes an Action after a specified delay",
 	request: SchedulerScheduleOnceRequestSchema,
 	response: SchedulerScheduleOnceResponseSchema,
 	requiredPermissions: [SCHEDULER_WRITE_PERMISSION],
 	dependencies: [],
 	execute: async (params: SchedulerScheduleOnceRequest, injector: Injector): Promise<SchedulerScheduleOnceResponse> => {
 		const scheduler = injector.get(SchedulerService);
-		scheduler.scheduleEventOnce(params.id, params.delayMs, params.topic, params.payload);
+		const actionExecuter = injector.get<ActionExecuter>(ACTION_EXECUTER);
+		scheduler.scheduleActionOnce(params.id, params.delayMs, params.actionToken, params.actionParams, injector, actionExecuter);
 		return { scheduled: true };
 	},
 };

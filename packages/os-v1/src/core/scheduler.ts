@@ -3,7 +3,7 @@
  * 核心调度器服务 - 支持一次性、间隔、Cron 任务调度
  */
 
-import { Injectable, Optional } from "@context-ai/core";
+import { Injectable, Optional, Injector } from "@context-ai/core";
 import cronParser from "cron-parser";
 import type {
 	TaskHandle,
@@ -16,6 +16,8 @@ import type {
 import { exportSchedulerState } from "./scheduler-persistence.js";
 import { restoreSchedulerState, persistSchedulerState, recoverSchedulerState } from "./scheduler-state.js";
 import { EVENT_BUS, SCHEDULER_OPTIONS } from "../tokens.js";
+import type { ActionExecuter, Token } from "../tokens.js";
+import type { Static, TSchema } from "@mariozechner/pi-ai";
 
 /**
  * 调度器服务
@@ -36,10 +38,16 @@ export class SchedulerService {
 	private readonly retryableDefinitions = new Map<string, RetryableTaskDefinition>();
 	private readonly persistedTasks = new Map<string, SchedulerPersistedTask>();
 
+	/** 存储每个任务对应的 injector */
+	private readonly taskInjectors = new Map<string, Injector>();
+
+	/** 存储每个任务对应的 actionExecuter */
+	private readonly taskExecuters = new Map<string, ActionExecuter>();
+
 	constructor(
 		@Optional(EVENT_BUS) private readonly eventBus?: EventBus,
 		@Optional(SCHEDULER_OPTIONS) private readonly options?: SchedulerServiceOptions,
-	) {}
+	) { }
 
 	/**
 	 * 发布事件到事件总线
@@ -238,6 +246,245 @@ export class SchedulerService {
 		this.tasks.set(id, { stop: () => clearTimeout(timer) });
 	}
 
+	// ============================================================================
+	// Action 执行方法（新增）
+	// ============================================================================
+
+	/**
+	 * 执行 Action
+	 *
+	 * @param actionToken - 要执行的 Action token
+	 * @param actionParams - Action 请求参数
+	 * @param taskId - 任务 ID（用于日志和事件）
+	 */
+	private async executeAction<TRequest extends TSchema, TResponse extends TSchema>(
+		actionToken: Token<TRequest, TResponse>,
+		actionParams: Static<TRequest>,
+		taskId: string
+	): Promise<void> {
+		const injector = this.taskInjectors.get(taskId);
+		const actionExecuter = this.taskExecuters.get(taskId);
+
+		if (!actionExecuter || !injector) {
+			console.warn(`[Scheduler] ActionExecuter or Injector not available for task: ${taskId}`);
+			return;
+		}
+
+		try {
+			const result = await actionExecuter.execute(
+				actionToken,
+				actionParams,
+				injector,
+			);
+			this.eventBus?.publish("scheduler.action.succeeded", {
+				taskId,
+				actionToken,
+				result,
+			});
+		} catch (error) {
+			this.eventBus?.publish("scheduler.action.failed", {
+				taskId,
+				actionToken,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		}
+	}
+
+	/**
+	 * 调度基于 Action 的一次性任务
+	 *
+	 * @param id 任务 ID
+	 * @param delayMs 延迟时间（毫秒）
+	 * @param actionToken 要执行的 Action token
+	 * @param actionParams Action 请求参数
+	 * @param injector DI 注入器（用于执行 Action）
+	 * @param actionExecuter Action 执行器
+	 */
+	scheduleActionOnce(
+		id: string,
+		delayMs: number,
+		actionToken: string,
+		actionParams: unknown,
+		injector: Injector,
+		actionExecuter: ActionExecuter,
+	): void {
+		// 存储 injector 和 actionExecuter 供后续执行使用
+		this.taskInjectors.set(id, injector);
+		this.taskExecuters.set(id, actionExecuter);
+
+		const runAt = Date.now() + delayMs;
+		this.persistedTasks.set(id, {
+			id,
+			type: "once",
+			topic: `action:${actionToken}`,
+			actionToken,
+			actionParams,
+			runAt: new Date(runAt).toISOString(),
+		});
+		this.persistIfNeeded();
+
+		this.scheduleOnce(id, delayMs, () => {
+			void this.executeAction(actionToken, actionParams, id);
+			this.persistedTasks.delete(id);
+			this.taskInjectors.delete(id);
+			this.taskExecuters.delete(id);
+			this.persistIfNeeded();
+		});
+	}
+
+	/**
+	 * 调度基于 Action 的间隔任务
+	 *
+	 * @param id 任务 ID
+	 * @param intervalMs 间隔时间（毫秒）
+	 * @param actionToken 要执行的 Action token
+	 * @param actionParams Action 请求参数
+	 * @param injector DI 注入器（用于执行 Action）
+	 * @param actionExecuter Action 执行器
+	 * @param options 可选配置
+	 */
+	scheduleActionInterval(
+		id: string,
+		intervalMs: number,
+		actionToken: string,
+		actionParams: unknown,
+		injector: Injector,
+		actionExecuter: ActionExecuter,
+		options?: { maxRuns?: number },
+	): void {
+		// 存储 injector 和 actionExecuter 供后续执行使用
+		this.taskInjectors.set(id, injector);
+		this.taskExecuters.set(id, actionExecuter);
+
+		let runs = 0;
+		this.persistedTasks.set(id, {
+			id,
+			type: "interval",
+			topic: `action:${actionToken}`,
+			actionToken,
+			actionParams,
+			intervalMs,
+			maxRuns: options?.maxRuns,
+			runs: 0,
+		});
+		this.persistIfNeeded();
+
+		this.scheduleInterval(
+			id,
+			intervalMs,
+			() => {
+				runs += 1;
+				void this.executeAction(actionToken, actionParams, id);
+				const entry = this.persistedTasks.get(id);
+				if (entry) {
+					entry.runs = runs;
+					this.persistedTasks.set(id, entry);
+					this.persistIfNeeded();
+				}
+			},
+			options,
+		);
+	}
+
+	/**
+	 * 调度基于 Action 的 Cron 任务
+	 *
+	 * @param id 任务 ID
+	 * @param cronExpression Cron 表达式（如 "0 0 * * *" 表示每天午夜）
+	 * @param actionToken 要执行的 Action token
+	 * @param actionParams Action 请求参数
+	 * @param injector DI 注入器（用于执行 Action）
+	 * @param actionExecuter Action 执行器
+	 * @param timezone 时区（可选，默认使用系统时区）
+	 */
+	scheduleActionCron(
+		id: string,
+		cronExpression: string,
+		actionToken: string,
+		actionParams: unknown,
+		injector: Injector,
+		actionExecuter: ActionExecuter,
+		timezone?: string,
+	): void {
+		if (this.tasks.has(id)) {
+			throw new Error(`Task already exists: ${id}`);
+		}
+
+		// 存储 injector 和 actionExecuter 供后续执行使用
+		this.taskInjectors.set(id, injector);
+		this.taskExecuters.set(id, actionExecuter);
+
+		// 验证 cron 表达式并计算下次执行时间
+		let nextRun: Date;
+		try {
+			const interval = cronParser.parseExpression(cronExpression, {
+				tz: timezone || this.options?.defaultTimezone || undefined,
+			});
+			nextRun = interval.next().toDate();
+		} catch (error) {
+			throw new Error(`Invalid cron expression: ${cronExpression}`);
+		}
+
+		const nextRunAt = nextRun.toISOString();
+
+		// 持久化 cron 任务
+		this.persistedTasks.set(id, {
+			id,
+			type: "cron",
+			topic: `action:${actionToken}`,
+			actionToken,
+			actionParams,
+			cronExpression,
+			timezone: timezone || this.options?.defaultTimezone,
+			nextRunAt,
+		});
+		this.persistIfNeeded();
+
+		// 自调度函数：执行任务并调度下一次
+		const scheduleSelf = (): void => {
+			// 执行 Action
+			void this.executeAction(actionToken, actionParams, id);
+
+			// 更新上次执行时间
+			const now = new Date().toISOString();
+			const task = this.persistedTasks.get(id);
+			if (task) {
+				task.lastRunAt = now;
+			}
+
+			// 计算并调度下次执行
+			try {
+				const nextInterval = cronParser.parseExpression(cronExpression, {
+					currentDate: new Date(),
+					tz: timezone || this.options?.defaultTimezone || undefined,
+				});
+				const nextExecution = nextInterval.next().toDate();
+				const delayMs = nextExecution.getTime() - Date.now();
+
+				// 更新下次执行时间
+				if (task) {
+					task.nextRunAt = nextExecution.toISOString();
+					this.persistedTasks.set(id, task);
+					this.persistIfNeeded();
+				}
+
+				// 调度下次执行
+				const timer = setTimeout(scheduleSelf, delayMs);
+				this.tasks.set(id, { stop: () => clearTimeout(timer) });
+			} catch (error) {
+				// Cron 表达式解析失败，停止任务
+				this.tasks.delete(id);
+				this.persistedTasks.delete(id);
+				this.persistIfNeeded();
+			}
+		};
+
+		// 调度首次执行
+		const initialDelayMs = nextRun.getTime() - Date.now();
+		const timer = setTimeout(scheduleSelf, initialDelayMs);
+		this.tasks.set(id, { stop: () => clearTimeout(timer) });
+	}
+
 	/**
 	 * 取消任务
 	 */
@@ -248,6 +495,8 @@ export class SchedulerService {
 		task.stop();
 		this.tasks.delete(id);
 		this.persistedTasks.delete(id);
+		this.taskInjectors.delete(id);
+		this.taskExecuters.delete(id);
 		this.persistIfNeeded();
 		return true;
 	}

@@ -57,6 +57,12 @@ export interface SchedulerPersistedTask {
 	/** 事件负载 */
 	payload?: unknown;
 
+	// Action 执行相关字段（新增）
+	/** 要执行的 Action token */
+	actionToken?: string;
+	/** Action 请求参数 */
+	actionParams?: unknown;
+
 	// 一次性任务字段
 	/** 执行时间 (ISO 8601) - 用于 "once" 类型 */
 	runAt?: string;

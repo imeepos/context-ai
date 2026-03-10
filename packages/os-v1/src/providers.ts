@@ -41,7 +41,7 @@ import { schedulerStateExportAction } from "./actions/scheduler-state-export.act
 import { schedulerStateImportAction } from "./actions/scheduler-state-import.action.js";
 import { schedulerStatePersistAction } from "./actions/scheduler-state-persist.action.js";
 import { schedulerStateRecoverAction } from "./actions/scheduler-state-recover.action.js";
-import { EVENT_BUS, SCHEDULER_OPTIONS } from "./tokens.js";
+import { EVENT_BUS, SCHEDULER_OPTIONS, SCHEDULER_SERVICE } from "./tokens.js";
 import type { SchedulerServiceOptions } from "./tokens.js";
 import { FileSchedulerStateAdapter } from "./core/scheduler-persistence.js";
 import { EventBusService } from "./core/event-bus.js";
@@ -153,6 +153,10 @@ export const providers: Provider[] = [
     // SchedulerService 注册（单例，通过 DI 注入依赖）
     {
         provide: SchedulerService,
+        useClass: SchedulerService
+    },
+    {
+        provide: SCHEDULER_SERVICE,
         useClass: SchedulerService
     },
 
