@@ -3,6 +3,7 @@ import { dirname, join } from "path";
 import { Injectable, Inject } from "@context-ai/core";
 import type { OnDestroy } from "@context-ai/core";
 import { LOG_DIR, SESSION_ID } from "../tokens.js";
+import { SystemLogger } from "./system-logger.js";
 
 export interface LogEntry {
     timestamp: string;
@@ -81,6 +82,7 @@ export class SessionLogger implements ISessionLogger, OnDestroy {
     constructor(
         @Inject(LOG_DIR) logDir: string,
         @Inject(SESSION_ID) sessionId: string,
+        @Inject(SystemLogger) private logger: SystemLogger
     ) {
         this.sessionId = sessionId;
         this.logFilePath = join(logDir, `${sessionId}.log`);
@@ -115,11 +117,13 @@ export class SessionLogger implements ISessionLogger, OnDestroy {
     private write(entry: LogEntry): void {
         const formatted = this.formatEntry(entry);
         appendFileSync(this.logFilePath, formatted, 'utf-8');
+        this.logger.log(`${entry.timestamp} [${entry.level}] [${entry.category}] ${entry.message}`, entry.data);
     }
 
     private writeSeparator(title: string): void {
         const separator = `\n${'='.repeat(60)}\n${title}\n${'='.repeat(60)}\n`;
         appendFileSync(this.logFilePath, separator, 'utf-8');
+        this.logger.log(separator);
     }
 
     info(category: string, message: string, data?: unknown): void {

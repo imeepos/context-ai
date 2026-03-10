@@ -4,6 +4,8 @@ import {
     ACTIONS,
     APPLICATION_LOADER,
     CURRENT_DIR,
+    SYSTEM_LOG_FILTER,
+    SYSTEM_LOGGER,
     PROJECT_ROOT,
     ROOT_DIR,
     SHELL_PID_DIR,
@@ -28,22 +30,11 @@ import { fileGrepAction } from "./actions/file-grep.action.js";
 import { fileEditAction } from "./actions/file-edit.action.js";
 import { fileSnapshotAction } from "./actions/file-snapshot.action.js";
 import { fileRollbackAction } from "./actions/file-rollback.action.js";
-import { SchedulerService } from "./core/scheduler.js";
-import { schedulerScheduleOnceAction } from "./actions/scheduler-schedule-once.action.js";
-import { schedulerScheduleIntervalAction } from "./actions/scheduler-schedule-interval.action.js";
-import { schedulerScheduleCronAction } from "./actions/scheduler-schedule-cron.action.js";
-import { schedulerCancelAction } from "./actions/scheduler-cancel.action.js";
-import { schedulerListAction } from "./actions/scheduler-list.action.js";
-import { schedulerFailuresClearAction } from "./actions/scheduler-failures-clear.action.js";
-import { schedulerFailuresReplayAction } from "./actions/scheduler-failures-replay.action.js";
-import { schedulerStateExportAction } from "./actions/scheduler-state-export.action.js";
-import { schedulerStateImportAction } from "./actions/scheduler-state-import.action.js";
-import { schedulerStatePersistAction } from "./actions/scheduler-state-persist.action.js";
-import { schedulerStateRecoverAction } from "./actions/scheduler-state-recover.action.js";
-import { EVENT_BUS, SCHEDULER_OPTIONS, SCHEDULER_SERVICE } from "./tokens.js";
+import { EVENT_BUS, SCHEDULER_OPTIONS } from "./tokens.js";
 import type { SchedulerServiceOptions } from "./tokens.js";
 import { FileSchedulerStateAdapter } from "./core/scheduler-persistence.js";
 import { EventBusService } from "./core/event-bus.js";
+import { SystemLogger } from "./core/system-logger.js";
 import { ApplicationLoaderLocal } from "./core/ApplicationLoaderLocal.js";
 import { ApplicationLoaderSystem } from "./core/ApplicationLoaderSystem.js";
 import { LOOP_REQUEST_TOKEN, loopRequestAction } from "./actions/loop.action.js";
@@ -51,13 +42,69 @@ import { systemHeartbeatAction } from "./actions/system-heartbeat.action.js";
 import { codexAction } from "./actions/codex.action.js";
 import { claudeAction } from "./actions/claude.action.js";
 
-export const providers: Provider[] = [
+// App Actions
+import { appBuildAction } from "./actions/app-build.action.js";
+import { appDevAction } from "./actions/app-dev.action.js";
+import { appInstallAction } from "./actions/app-install.action.js";
+import { appPublishAction } from "./actions/app-publish.action.js";
+import { appRunAction } from "./actions/app-run.action.js";
+import { appSearchAction } from "./actions/app-search.action.js";
+import { appTestAction } from "./actions/app-test.action.js";
+import { appUninstallAction } from "./actions/app-uninstall.action.js";
+import { appUpgradeAction } from "./actions/app-upgrade.action.js";
+import { bowongModelActions } from "./actions/bowong/index.js";
+
+export const platformProviders: Provider[] = [
     // 路径常量注册
     { provide: ROOT_DIR, useValue: join(homedir(), '.context-ai') },
+    { provide: SYSTEM_LOG_FILTER, useValue: process.env.OS_LOG_FILTER ?? "*" },
+    { provide: SYSTEM_LOGGER, useClass: SystemLogger },
     { provide: SHELL_SESSION_DIR, useFactory: (root: string) => join(root, 'shell', 'sessions'), deps: [ROOT_DIR] },
     { provide: SHELL_PID_DIR, useFactory: (root: string) => join(root, 'shell', 'pids'), deps: [ROOT_DIR] },
     { provide: CURRENT_DIR, useValue: process.cwd() },
     { provide: PROJECT_ROOT, useValue: join(__dirname, '../../../') },
+    {
+        provide: SCHEDULER_OPTIONS,
+        useFactory: (root: string) => ({
+            storage: new FileSchedulerStateAdapter(join(root, 'scheduler', 'state.json')),
+            autoPersist: true,
+            defaultTimezone: 'UTC'
+        } as SchedulerServiceOptions),
+        deps: [ROOT_DIR]
+    },
+
+    // EventBus 注册（基于 Node.js EventEmitter 的实现)
+    {
+        provide: EVENT_BUS,
+        useClass: EventBusService
+    },
+    // Application local loader
+    {
+        provide: APPLICATION_LOADER,
+        useFactory: (root: string) => {
+            const path = join(root, 'addons')
+            return new ApplicationLoaderLocal(path)
+        },
+        deps: [PROJECT_ROOT],
+        multi: true
+    },
+    // application system loader
+    {
+        provide: APPLICATION_LOADER,
+        useFactory: () => new ApplicationLoaderSystem(),
+        deps: [],
+        multi: true
+    },
+    // ActionExecuter 注册（注入 EventBus）
+    {
+        provide: ACTION_EXECUTER,
+        useFactory: (actions, eventBus) => new ActionExecuterImpl(actions, eventBus),
+        deps: [ACTIONS, EVENT_BUS]
+    },
+
+];
+
+export const applicationProviders: Provider[] = [
     // Action 注册
     {
         provide: ACTIONS,
@@ -133,125 +180,6 @@ export const providers: Provider[] = [
         multi: true
     },
     { provide: fileRollbackAction.type, useValue: fileRollbackAction },
-
-    // EventBus 注册（基于 Node.js EventEmitter 的实现）
-    {
-        provide: EVENT_BUS,
-        useClass: EventBusService
-    },
-
-    // SchedulerServiceOptions 注册（可选配置）
-    {
-        provide: SCHEDULER_OPTIONS,
-        useFactory: (root: string) => ({
-            storage: new FileSchedulerStateAdapter(join(root, 'scheduler', 'state.json')),
-            autoPersist: true,
-            defaultTimezone: 'UTC'
-        } as SchedulerServiceOptions),
-        deps: [ROOT_DIR]
-    },
-
-    // SchedulerService 注册（单例，通过 DI 注入依赖）
-    {
-        provide: SchedulerService,
-        useClass: SchedulerService
-    },
-    {
-        provide: SCHEDULER_SERVICE,
-        useClass: SchedulerService
-    },
-
-    // Scheduler Actions 注册
-    {
-        provide: ACTIONS,
-        useValue: schedulerScheduleOnceAction,
-        multi: true
-    },
-    { provide: schedulerScheduleOnceAction.type, useValue: schedulerScheduleOnceAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerScheduleIntervalAction,
-        multi: true
-    },
-    { provide: schedulerScheduleIntervalAction.type, useValue: schedulerScheduleIntervalAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerScheduleCronAction,
-        multi: true
-    },
-    { provide: schedulerScheduleCronAction.type, useValue: schedulerScheduleCronAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerCancelAction,
-        multi: true
-    },
-    { provide: schedulerCancelAction.type, useValue: schedulerCancelAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerListAction,
-        multi: true
-    },
-    { provide: schedulerListAction.type, useValue: schedulerListAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerFailuresClearAction,
-        multi: true
-    },
-    { provide: schedulerFailuresClearAction.type, useValue: schedulerFailuresClearAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerFailuresReplayAction,
-        multi: true
-    },
-    { provide: schedulerFailuresReplayAction.type, useValue: schedulerFailuresReplayAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerStateExportAction,
-        multi: true
-    },
-    { provide: schedulerStateExportAction.type, useValue: schedulerStateExportAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerStateImportAction,
-        multi: true
-    },
-    { provide: schedulerStateImportAction.type, useValue: schedulerStateImportAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerStatePersistAction,
-        multi: true
-    },
-    { provide: schedulerStatePersistAction.type, useValue: schedulerStatePersistAction },
-    {
-        provide: ACTIONS,
-        useValue: schedulerStateRecoverAction,
-        multi: true
-    },
-    { provide: schedulerStateRecoverAction.type, useValue: schedulerStateRecoverAction },
-
-    // Application local loader
-    {
-        provide: APPLICATION_LOADER,
-        useFactory: (root: string) => {
-            const path = join(root, 'addons')
-            return new ApplicationLoaderLocal(path)
-        },
-        deps: [PROJECT_ROOT],
-        multi: true
-    },
-    // application system loader
-    {
-        provide: APPLICATION_LOADER,
-        useFactory: () => new ApplicationLoaderSystem(),
-        deps: [],
-        multi: true
-    },
-    // ActionExecuter 注册（注入 EventBus）
-    {
-        provide: ACTION_EXECUTER,
-        useFactory: (actions, eventBus) => new ActionExecuterImpl(actions, eventBus),
-        deps: [ACTIONS, EVENT_BUS]
-    },
     { provide: LOOP_REQUEST_TOKEN, useValue: loopRequestAction },
     { provide: ACTIONS, useValue: loopRequestAction, multi: true },
     // System Heartbeat Action 注册
@@ -274,5 +202,65 @@ export const providers: Provider[] = [
         useValue: claudeAction,
         multi: true
     },
-    { provide: claudeAction.type, useValue: claudeAction }
+    { provide: claudeAction.type, useValue: claudeAction },
+    // App Actions 注册
+    {
+        provide: ACTIONS,
+        useValue: appBuildAction,
+        multi: true
+    },
+    { provide: appBuildAction.type, useValue: appBuildAction },
+    {
+        provide: ACTIONS,
+        useValue: appDevAction,
+        multi: true
+    },
+    { provide: appDevAction.type, useValue: appDevAction },
+    {
+        provide: ACTIONS,
+        useValue: appInstallAction,
+        multi: true
+    },
+    { provide: appInstallAction.type, useValue: appInstallAction },
+    {
+        provide: ACTIONS,
+        useValue: appPublishAction,
+        multi: true
+    },
+    { provide: appPublishAction.type, useValue: appPublishAction },
+    {
+        provide: ACTIONS,
+        useValue: appRunAction,
+        multi: true
+    },
+    { provide: appRunAction.type, useValue: appRunAction },
+    {
+        provide: ACTIONS,
+        useValue: appSearchAction,
+        multi: true
+    },
+    { provide: appSearchAction.type, useValue: appSearchAction },
+    {
+        provide: ACTIONS,
+        useValue: appTestAction,
+        multi: true
+    },
+    { provide: appTestAction.type, useValue: appTestAction },
+    {
+        provide: ACTIONS,
+        useValue: appUninstallAction,
+        multi: true
+    },
+    { provide: appUninstallAction.type, useValue: appUninstallAction },
+    {
+        provide: ACTIONS,
+        useValue: appUpgradeAction,
+        multi: true
+    },
+    { provide: appUpgradeAction.type, useValue: appUpgradeAction },
+    // Bowong model actions
+    ...bowongModelActions.flatMap((action) => ([
+        { provide: ACTIONS, useValue: action, multi: true },
+        { provide: action.type, useValue: action },
+    ])),
 ]

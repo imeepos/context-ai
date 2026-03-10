@@ -185,15 +185,6 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
                 prompt: ctx.prompt
             });
 
-            // 记录所有可用工具的详细信息
-            logger.info('LOOP_ACTION', 'Available Tools', {
-                tools: ctx.tools.map(tool => ({
-                    name: tool.name,
-                    description: tool.description,
-                    parameters: tool.parameters
-                }))
-            });
-
             // ============================================================================
             // 4. 创建 Agent
             // ============================================================================
@@ -207,6 +198,7 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
             // ============================================================================
             let finalMessages: AgentMessage[] = [];
             let executionError: string | undefined;
+            let agentResponseError: string | undefined;
             let turnIndex = 0;
 
             // ============================================================================
@@ -260,12 +252,13 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
                     // 记录 API 使用情况
                     if ('usage' in message) {
                         const usage = message.usage as TokenUsage;
+                        const stopReason = 'stopReason' in message ? (message.stopReason as string) : 'unknown';
                         const apiCall: ApiCallRecord = {
                             turnIndex,
                             provider: 'provider' in message ? (message.provider as string) : 'unknown',
                             model: 'model' in message ? (message.model as string) : 'unknown',
                             usage,
-                            stopReason: 'stopReason' in message ? (message.stopReason as string) : 'unknown',
+                            stopReason,
                             timestamp: Date.now()
                         };
                         apiCalls.push(apiCall);
@@ -280,6 +273,11 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
                             totalTokens: usage.totalTokens,
                             stopReason: apiCall.stopReason
                         });
+
+                        if (stopReason === "error") {
+                            const messageWithError = message as { errorMessage?: string };
+                            agentResponseError = messageWithError.errorMessage ?? "Agent model stopReason=error";
+                        }
                     }
 
                     logger.info('LOOP_ACTION', `========== TURN #${turnIndex} END ==========`, {
@@ -416,9 +414,9 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
                 // 11. 构建最终结果
                 // ============================================================================
                 const result = {
-                    success: !executionError,
+                    success: !executionError && !agentResponseError,
                     output: output || "(Agent completed with no text output)",
-                    error: executionError,
+                    error: executionError ?? agentResponseError,
                     toolCallsCount
                 };
 

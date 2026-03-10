@@ -48,9 +48,6 @@ import { fileGrepAction } from "./actions/file-grep.action.js";
 import { fileEditAction } from "./actions/file-edit.action.js";
 import { fileSnapshotAction } from "./actions/file-snapshot.action.js";
 import { fileRollbackAction } from "./actions/file-rollback.action.js";
-import { schedulerScheduleOnceAction } from "./actions/scheduler-schedule-once.action.js";
-import { schedulerScheduleIntervalAction } from "./actions/scheduler-schedule-interval.action.js";
-import { schedulerScheduleCronAction } from "./actions/scheduler-schedule-cron.action.js";
 import { schedulerCancelAction } from "./actions/scheduler-cancel.action.js";
 import { schedulerListAction } from "./actions/scheduler-list.action.js";
 import { schedulerFailuresClearAction } from "./actions/scheduler-failures-clear.action.js";
@@ -60,6 +57,7 @@ import { schedulerStateImportAction } from "./actions/scheduler-state-import.act
 import { schedulerStatePersistAction } from "./actions/scheduler-state-persist.action.js";
 import { schedulerStateRecoverAction } from "./actions/scheduler-state-recover.action.js";
 import { loopRequestAction } from "./actions/loop.action.js";
+import { bowongModelActions } from "./actions/bowong/index.js";
 
 // ============================================================================
 // Action 注册函数
@@ -82,9 +80,6 @@ function getActionProviders(): Provider[] {
         fileEditAction,
         fileSnapshotAction,
         fileRollbackAction,
-        schedulerScheduleOnceAction,
-        schedulerScheduleIntervalAction,
-        schedulerScheduleCronAction,
         schedulerCancelAction,
         schedulerListAction,
         schedulerFailuresClearAction,
@@ -94,6 +89,7 @@ function getActionProviders(): Provider[] {
         schedulerStatePersistAction,
         schedulerStateRecoverAction,
         loopRequestAction,
+        ...bowongModelActions,
     ];
 
     return actions.flatMap(action => [
@@ -201,6 +197,7 @@ export const testProviders: Provider[] = [
             'ai:text:generate',
             'ai:image:generate',
             'ai:video:generate',
+            'bowong:model:invoke',
         ]
     },
 ];

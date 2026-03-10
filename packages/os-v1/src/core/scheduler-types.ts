@@ -39,6 +39,68 @@ export interface RetryableTaskDefinition {
 	};
 }
 
+export type WorkflowTaskStatus = "pending" | "running" | "completed" | "failed" | "cancelled";
+
+export interface WorkflowTaskDefinition {
+	/** 任务 ID（工作流内唯一） */
+	id: string;
+	/** Action token */
+	actionToken: string;
+	/** Action 参数 */
+	actionParams?: unknown;
+	/** 依赖任务 ID 列表，全部完成后才可执行 */
+	dependsOn?: string[];
+}
+
+export interface WorkflowTaskRuntime extends WorkflowTaskDefinition {
+	/** 当前状态 */
+	status: WorkflowTaskStatus;
+	/** 任务所属计划版本 */
+	planVersion: number;
+	/** 执行次数 */
+	attempt: number;
+	/** 最后错误 */
+	lastError?: string;
+}
+
+export interface WorkflowReplanContext {
+	workflowId: string;
+	completedTaskId: string;
+	contextVersion: number;
+	planVersion: number;
+	nextTaskIds: string[];
+}
+
+export interface WorkflowDefinition {
+	/** 工作流 ID */
+	id: string;
+	/** 任务定义 */
+	tasks: WorkflowTaskDefinition[];
+	/** 是否自动调度就绪任务，默认 true */
+	autoDispatch?: boolean;
+	/** 任务完成后的重规划钩子 */
+	onReplan?: (context: WorkflowReplanContext) => void;
+}
+
+export interface WorkflowUpdate {
+	/** 删除任务 */
+	removeTaskIds?: string[];
+	/** 新增或更新任务 */
+	upsertTasks?: WorkflowTaskDefinition[];
+}
+
+export interface WorkflowState {
+	id: string;
+	contextVersion: number;
+	planVersion: number;
+	autoDispatch: boolean;
+	taskOrder: string[];
+	tasks: Record<string, WorkflowTaskRuntime>;
+	completedTaskIds: string[];
+	runningTaskIds: string[];
+	pendingTaskIds: string[];
+}
+
 /**
  * 持久化任务类型
  */
@@ -90,6 +152,8 @@ export interface SchedulerStateSnapshot {
 	tasks: SchedulerPersistedTask[];
 	/** 失败记录列表 */
 	failures: SchedulerFailureRecord[];
+	/** 工作流状态快照 */
+	workflows?: WorkflowState[];
 }
 
 /**

@@ -1,6 +1,7 @@
 import { Type, type Static } from "@sinclair/typebox";
 import type { Action, Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
+import { SYSTEM_LOGGER } from "../tokens.js";
 
 // ============================================================================
 // System Heartbeat Action - 请求/响应 Schema 定义
@@ -86,8 +87,7 @@ export const systemHeartbeatAction: Action<
 		const timestamp = Date.now();
 		const uptime = process.uptime() * 1000; // 转换为毫秒
 
-		// 心跳任务是系统级的，使用 console.log 记录
-		console.log('[HEARTBEAT]', new Date(timestamp).toISOString(), {
+		const payload = {
 			uptime: `${(uptime / 1000).toFixed(2)}s`,
 			message: params.message,
 			memory: {
@@ -95,7 +95,10 @@ export const systemHeartbeatAction: Action<
 				heapUsed: `${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
 			},
 			pid: process.pid,
-		});
+		};
+
+		const systemLogger = _injector.get(SYSTEM_LOGGER);
+		systemLogger.log("heartbeat:system", new Date(timestamp).toISOString(), payload);
 
 		return {
 			timestamp,
