@@ -48,12 +48,13 @@ describe('loop.action - Page Not Found', () => {
     });
 
     it('should return error when page path does not match', async () => {
-        const { feature } = await createTestInjector([], {
+        const { platform, feature } = await createTestInjector([], {
             sessionId: 'test-page-not-found',
             logger: mockLogger
         });
 
         const result = await executeAction(
+            platform,
             feature,
             LOOP_REQUEST_TOKEN,
             {
@@ -86,12 +87,13 @@ describe('loop.action - Mock Page Execution', () => {
         };
 
         const mockLogger = new MemorySessionLogger('test-mock-page');
-        const { feature } = await createTestInjector([mockPage], {
+        const { platform, feature } = await createTestInjector([mockPage], {
             sessionId: 'test-mock-page',
             logger: mockLogger
         });
 
         const result = await executeAction(
+            platform,
             feature,
             LOOP_REQUEST_TOKEN,
             {
@@ -134,12 +136,13 @@ describe('loop.action - Dynamic Route Parameters', () => {
         };
 
         const mockLogger = new MemorySessionLogger('test-dynamic');
-        const { feature } = await createTestInjector([mockPage], {
+        const { platform, feature } = await createTestInjector([mockPage], {
             sessionId: 'test-dynamic',
             logger: mockLogger
         });
 
         const result = await executeAction(
+            platform,
             feature,
             LOOP_REQUEST_TOKEN,
             {
@@ -211,12 +214,13 @@ describe('loop.action - Logging', () => {
         };
 
         const testLogger = new MemorySessionLogger('test-logging');
-        const { feature } = await createTestInjector([mockPage], {
+        const { platform, feature } = await createTestInjector([mockPage], {
             sessionId: 'test-logging',
             logger: testLogger
         });
 
         await executeAction(
+            platform,
             feature,
             LOOP_REQUEST_TOKEN,
             {
@@ -257,12 +261,13 @@ describe('loop.action - Logging', () => {
         };
 
         const testLogger = new MemorySessionLogger('test-detailed-logging');
-        const { feature } = await createTestInjector([mockPage], {
+        const { platform, feature } = await createTestInjector([mockPage], {
             sessionId: 'test-detailed-logging',
             logger: testLogger
         });
 
         await executeAction(
+            platform,
             feature,
             LOOP_REQUEST_TOKEN,
             {
@@ -298,12 +303,13 @@ describe('loop.action - Wildcard Route Matching', () => {
         };
 
         const mockLogger = new MemorySessionLogger('test-wildcard');
-        const { feature } = await createTestInjector([mockPage], {
+        const { platform, feature } = await createTestInjector([mockPage], {
             sessionId: 'test-wildcard',
             logger: mockLogger
         });
 
         const result = await executeAction(
+            platform,
             feature,
             LOOP_REQUEST_TOKEN,
             {

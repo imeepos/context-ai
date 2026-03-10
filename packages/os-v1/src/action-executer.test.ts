@@ -4,13 +4,12 @@
  * 测试 ActionExecuter 的事件发射功能
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ActionExecuterImpl } from './action-executer.js';
 import { Type } from '@sinclair/typebox';
 import { Injector } from '@context-ai/core';
-import { SESSION_ID, EVENT_BUS } from './tokens.js';
+import { SESSION_ID } from './tokens.js';
 import type { Action, EventBus } from './tokens.js';
-import type { EventEnvelope } from './events.js';
 import {
     ACTION_STARTED_EVENT,
     ACTION_PROGRESS_EVENT,

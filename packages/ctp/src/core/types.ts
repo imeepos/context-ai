@@ -46,4 +46,6 @@ export interface JSXElement {
   props: Record<string, unknown> | null;
   /** React key，用于列表渲染时的 diff 优化 */
   key?: string | null;
+  /** Optional children for compatibility with ReactNode */
+  children?: unknown;
 }

@@ -2,23 +2,13 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDirs": ["./src", "./contexts"],
+    "rootDir": "./src",
     "composite": true,
     "jsx": "react",
     "jsxFactory": "jsx.jsx",
     "jsxFragmentFactory": "jsx.jsxFragment",
-    "lib": [
-      "ES2022",
-      "DOM"
-    ]
+    "lib": ["ES2022", "DOM"]
   },
-  "include": [
-    "src/**/*",
-    "contexts/**/*"
-  ],
-  "exclude": [
-    "node_modules",
-    "dist",
-    "tests"
-  ]
+  "include": ["src/**/*", "contexts/**/*"],
+  "exclude": ["node_modules", "dist", "tests"]
 }
