@@ -5,7 +5,7 @@
  */
 
 import { createApplicationInjector, createFeatureInjector } from "@context-ai/core";
-import { testProviders } from "./providers.test.js";
+import { testProviders } from "./test-provider.js";
 import {
     ACTION_EXECUTER,
     APPLICATIONS,
@@ -17,10 +17,9 @@ import {
 import { createPageFactory } from "./createPageFactory.js";
 import type { Provider } from "@context-ai/core";
 import type { Injector } from "@context-ai/core";
-import type { Application, Page, Token } from "./tokens.js";
+import type { Application, Page } from "./tokens.js";
 import { MemorySessionLogger } from "./core/session-logger.js";
 import { createPlatformInjector } from "@context-ai/core";
-import type { Static, TSchema } from "@mariozechner/pi-ai";
 
 // ============================================================================
 // 全局测试平台注入器（单例）
@@ -197,21 +196,10 @@ export function getActionExecuter(platform: Injector) {
     return platform.get(ACTION_EXECUTER);
 }
 
-/**
- * 执行 Action 并返回结果（快捷方法）
- */
-export async function executeAction<TRequest extends TSchema, TResponse extends TSchema>(
-    feature: Injector,
-    token: Token<TRequest, TResponse>,
-    params: Static<TRequest>
-): Promise<Static<TResponse>> {
-    const platform = getGlobalTestPlatform()
-    const executer = getActionExecuter(platform);
-    return executer.execute(token, params, feature) as Promise<TResponse>;
-}
+export * from './executeAction.js'
 
 // ============================================================================
 // 导出
 // ============================================================================
 
-export { testProviders } from "./providers.test.js";
+export { testProviders } from "./test-provider.js";

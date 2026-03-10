@@ -28,7 +28,7 @@ describe('ActionExecuterImpl', () => {
         // 创建 mock EventBus
         publishSpy = vi.fn();
         mockEventBus = {
-            publish: publishSpy,
+            publish: publishSpy as any,
             subscribe: vi.fn(),
             getEventStream: vi.fn()
         };

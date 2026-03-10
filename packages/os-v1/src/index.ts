@@ -7,9 +7,12 @@ export * from './actions/shell-execute.action.js';
 export * from './actions/shell-env-set.action.js';
 export * from './actions/shell-env-list.action.js';
 export * from './actions/shell-env-unset.action.js';
-export * from './actions/loop.action.js'
-export * from './actions/system-heartbeat.action.js'
-export * from './core/session-logger.js'
+export * from './actions/loop.action.js';
+export * from './actions/system-heartbeat.action.js';
+export * from './core/session-logger.js';
+export * from './executeAction.js';
+import * as test from './test-helpers.js';
+export { test }
 /**
  * 系统级
  */
