@@ -246,11 +246,11 @@ export const providers: Provider[] = [
         deps: [],
         multi: true
     },
-    // ActionExecuter 注册
+    // ActionExecuter 注册（注入 EventBus）
     {
         provide: ACTION_EXECUTER,
-        useFactory: (actions) => new ActionExecuterImpl(actions),
-        deps: [ACTIONS]
+        useFactory: (actions, eventBus) => new ActionExecuterImpl(actions, eventBus),
+        deps: [ACTIONS, EVENT_BUS]
     },
     { provide: LOOP_REQUEST_TOKEN, useValue: loopRequestAction },
     { provide: ACTIONS, useValue: loopRequestAction, multi: true },

@@ -27,6 +27,8 @@
 import { InjectionToken, Injector, type Provider } from '@context-ai/core';
 import type { Static, TSchema } from '@mariozechner/pi-ai';
 import type { RenderedContext, JSXElement } from '@context-ai/ctp';
+import type { Observable, Subscription } from 'rxjs';
+import type { EventEnvelope, EventToken } from './events.js';
 
 // ============================================================================
 // 应用与页面定义
@@ -338,10 +340,25 @@ export const SCHEDULER_OPTIONS = new InjectionToken<SchedulerServiceOptions>("SC
  * 事件总线接口
  */
 export interface EventBus {
-    /** 发布事件 */
-    publish(topic: string, payload: unknown): void;
-    /** 订阅事件（可选） */
-    subscribe?(topic: string, handler: (payload: unknown) => void): void;
+    /** 发布事件（类型安全） */
+    publish<TPayload extends TSchema>(
+        sessionId: string,
+        token: EventToken<TPayload>,
+        payload: Static<TPayload>
+    ): void;
+
+    /** 订阅事件（支持通配符和过滤） */
+    subscribe<TPayload extends TSchema>(
+        pattern: string | EventToken<TPayload>,
+        handler: (envelope: EventEnvelope<TPayload>) => void,
+        options?: { sessionId?: string; metadata?: Record<string, unknown> }
+    ): Subscription;
+
+    /** 获取事件流的 Observable（高级用法） */
+    getEventStream<TPayload extends TSchema>(
+        pattern?: string | EventToken<TPayload>,
+        sessionId?: string
+    ): Observable<EventEnvelope<TPayload>>;
 }
 
 /**

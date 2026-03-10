@@ -1,8 +1,15 @@
-import { Injectable, Injector } from '@context-ai/core';
+import { Injectable, Injector, Optional } from '@context-ai/core';
 import { Value } from '@sinclair/typebox/value';
 import type { Static, TSchema } from '@sinclair/typebox';
-import type { Action, ActionExecuter, Token } from './tokens.js';
-import { USER_PERMISSIONS } from './tokens.js';
+import type { Action, ActionExecuter, Token, EventBus } from './tokens.js';
+import { USER_PERMISSIONS, EVENT_BUS, SESSION_ID } from './tokens.js';
+import type { EventToken } from './events.js';
+import {
+    ACTION_STARTED_EVENT,
+    ACTION_PROGRESS_EVENT,
+    ACTION_COMPLETED_EVENT,
+    ACTION_FAILED_EVENT
+} from './events.js';
 
 // ============================================================================
 // 错误类定义
@@ -100,8 +107,12 @@ export class ActionExecuterImpl implements ActionExecuter {
     /**
      * 构造函数
      * @param actions - 所有可用的 Action 列表
+     * @param eventBus - 可选的事件总线（用于发射执行事件）
      */
-    constructor(actions: Action<any, any>[]) {
+    constructor(
+        actions: Action<any, any>[],
+        @Optional(EVENT_BUS) private readonly eventBus?: EventBus
+    ) {
         this.registerActions(actions);
     }
 
@@ -134,32 +145,110 @@ export class ActionExecuterImpl implements ActionExecuter {
         injector: Injector
     ): Promise<Static<TResponse>> {
         const token = type as string;
+        const executionId = crypto.randomUUID();
+        const startTime = Date.now();
 
-        // 1. 查找 Action
-        const action = this.findAction(token);
+        // 获取 sessionId
+        const sessionId = injector.get(SESSION_ID, "unknown");
 
-        // 2. 验证请求参数
-        this.validateRequest(action, params);
+        // 发射：执行开始
+        this.emitEvent(sessionId, ACTION_STARTED_EVENT, {
+            executionId,
+            token,
+            params
+        });
 
-        // 3. 检查权限
-        await this.checkPermissions(action, injector);
-
-        // 4. 验证依赖
-        await this.checkDependencies(action, injector);
-
-        // 5. 执行 Action
         try {
+            // 1. 查找 Action
+            const action = this.findAction(token);
+            this.emitEvent(sessionId, ACTION_PROGRESS_EVENT, {
+                executionId,
+                token,
+                stage: "action_found"
+            });
+
+            // 2. 验证请求参数
+            this.validateRequest(action, params);
+            this.emitEvent(sessionId, ACTION_PROGRESS_EVENT, {
+                executionId,
+                token,
+                stage: "params_validated"
+            });
+
+            // 3. 检查权限
+            await this.checkPermissions(action, injector);
+            this.emitEvent(sessionId, ACTION_PROGRESS_EVENT, {
+                executionId,
+                token,
+                stage: "permissions_checked"
+            });
+
+            // 4. 验证依赖
+            await this.checkDependencies(action, injector);
+            this.emitEvent(sessionId, ACTION_PROGRESS_EVENT, {
+                executionId,
+                token,
+                stage: "dependencies_checked"
+            });
+
+            // 5. 执行 Action
+            this.emitEvent(sessionId, ACTION_PROGRESS_EVENT, {
+                executionId,
+                token,
+                stage: "executing"
+            });
             const result = await action.execute(params, injector);
 
             // 6. 验证响应
             this.validateResponse(action, result);
+            this.emitEvent(sessionId, ACTION_PROGRESS_EVENT, {
+                executionId,
+                token,
+                stage: "response_validated"
+            });
+
+            // 发射：执行完成
+            const endTime = Date.now();
+            this.emitEvent(sessionId, ACTION_COMPLETED_EVENT, {
+                executionId,
+                token,
+                result,
+                duration: endTime - startTime
+            });
 
             return result;
         } catch (error) {
+            // 发射：执行失败
+            const endTime = Date.now();
+            this.emitEvent(sessionId, ACTION_FAILED_EVENT, {
+                executionId,
+                token,
+                error: error instanceof Error ? error.message : String(error),
+                errorStack: error instanceof Error ? error.stack : undefined,
+                duration: endTime - startTime
+            });
+
             if (error instanceof Error) {
                 throw new ExecutionError(token, error);
             }
             throw error;
+        }
+    }
+
+    /**
+     * 发射事件到 EventBus
+     */
+    private emitEvent<TPayload extends TSchema>(
+        sessionId: string,
+        token: EventToken<TPayload>,
+        payload: Static<TPayload>
+    ): void {
+        if (this.eventBus) {
+            try {
+                this.eventBus.publish(sessionId, token, payload);
+            } catch (error) {
+                console.error(`[ActionExecuter] Failed to emit event:`, error);
+            }
         }
     }
 
