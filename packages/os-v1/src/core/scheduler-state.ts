@@ -46,18 +46,15 @@ export interface RecoverResult {
 }
 
 /**
- * 从快照恢复调度器状态
+ * 从快照恢复调度器状态（仅 Action 任务）
  */
 export function restoreSchedulerState(
 	snapshot: { tasks?: SchedulerPersistedTask[]; failures?: SchedulerFailureRecord[] },
 	existingTaskIds: Set<string>,
-	scheduleEventOnce: (id: string, delayMs: number, topic: string, payload: unknown) => void,
-	scheduleEventInterval: (id: string, intervalMs: number, topic: string, payload: unknown, maxRuns?: number) => void,
-	scheduleEventCron: (id: string, cronExpression: string, topic: string, payload: unknown, timezone?: string) => void,
 	failures: SchedulerFailureRecord[],
-	scheduleActionOnce?: (id: string, delayMs: number, actionToken: string, actionParams: unknown) => void,
-	scheduleActionInterval?: (id: string, intervalMs: number, actionToken: string, actionParams: unknown, maxRuns?: number) => void,
-	scheduleActionCron?: (id: string, cronExpression: string, actionToken: string, actionParams: unknown, timezone?: string) => void,
+	scheduleOnceAction: (id: string, delayMs: number, actionToken: string, actionParams: unknown) => void,
+	scheduleIntervalAction: (id: string, intervalMs: number, actionToken: string, actionParams: unknown, maxRuns?: number) => void,
+	scheduleCronAction: (id: string, cronExpression: string, actionToken: string, actionParams: unknown, timezone?: string) => void,
 ): RestoreResult {
 	let restoredTasks = 0;
 
@@ -65,53 +62,27 @@ export function restoreSchedulerState(
 		for (const task of snapshot.tasks) {
 			if (existingTaskIds.has(task.id)) continue;
 
-			// 检查是否是 Action 任务
+			// 所有任务都是 Action 任务
 			if (task.actionToken) {
 				if (task.type === "once") {
-					if (scheduleActionOnce) {
-						const runAtMs = task.runAt ? Date.parse(task.runAt) : Date.now();
-						const delayMs = Math.max(0, runAtMs - Date.now());
-						scheduleActionOnce(task.id, delayMs, task.actionToken, task.actionParams);
-						restoredTasks += 1;
-					}
+					const runAtMs = task.runAt ? Date.parse(task.runAt) : Date.now();
+					const delayMs = Math.max(0, runAtMs - Date.now());
+					scheduleOnceAction(task.id, delayMs, task.actionToken, task.actionParams);
+					restoredTasks += 1;
 					continue;
 				}
 
 				if (task.type === "interval" && task.intervalMs && task.intervalMs > 0) {
-					if (scheduleActionInterval) {
-						scheduleActionInterval(task.id, task.intervalMs, task.actionToken, task.actionParams, task.maxRuns);
-						restoredTasks += 1;
-					}
+					scheduleIntervalAction(task.id, task.intervalMs, task.actionToken, task.actionParams, task.maxRuns);
+					restoredTasks += 1;
 					continue;
 				}
 
 				if (task.type === "cron" && task.cronExpression) {
-					if (scheduleActionCron) {
-						scheduleActionCron(task.id, task.cronExpression, task.actionToken, task.actionParams, task.timezone);
-						restoredTasks += 1;
-					}
+					scheduleCronAction(task.id, task.cronExpression, task.actionToken, task.actionParams, task.timezone);
+					restoredTasks += 1;
 					continue;
 				}
-			}
-
-			// 事件任务恢复（原有逻辑）
-			if (task.type === "once") {
-				const runAtMs = task.runAt ? Date.parse(task.runAt) : Date.now();
-				const delayMs = Math.max(0, runAtMs - Date.now());
-				scheduleEventOnce(task.id, delayMs, task.topic, task.payload);
-				restoredTasks += 1;
-				continue;
-			}
-
-			if (task.type === "interval" && task.intervalMs && task.intervalMs > 0) {
-				scheduleEventInterval(task.id, task.intervalMs, task.topic, task.payload, task.maxRuns);
-				restoredTasks += 1;
-				continue;
-			}
-
-			if (task.type === "cron" && task.cronExpression) {
-				scheduleEventCron(task.id, task.cronExpression, task.topic, task.payload, task.timezone);
-				restoredTasks += 1;
 			}
 		}
 	}
@@ -143,18 +114,15 @@ export function persistSchedulerState(
 }
 
 /**
- * 从存储恢复调度器状态
+ * 从存储恢复调度器状态（仅 Action 任务）
  */
 export function recoverSchedulerState(
 	options: SchedulerServiceOptions | undefined,
 	existingTaskIds: Set<string>,
-	scheduleEventOnce: (id: string, delayMs: number, topic: string, payload: unknown) => void,
-	scheduleEventInterval: (id: string, intervalMs: number, topic: string, payload: unknown, maxRuns?: number) => void,
-	scheduleEventCron: (id: string, cronExpression: string, topic: string, payload: unknown, timezone?: string) => void,
 	failures: SchedulerFailureRecord[],
-	scheduleActionOnce?: (id: string, delayMs: number, actionToken: string, actionParams: unknown) => void,
-	scheduleActionInterval?: (id: string, intervalMs: number, actionToken: string, actionParams: unknown, maxRuns?: number) => void,
-	scheduleActionCron?: (id: string, cronExpression: string, actionToken: string, actionParams: unknown, timezone?: string) => void,
+	scheduleOnceAction: (id: string, delayMs: number, actionToken: string, actionParams: unknown) => void,
+	scheduleIntervalAction: (id: string, intervalMs: number, actionToken: string, actionParams: unknown, maxRuns?: number) => void,
+	scheduleCronAction: (id: string, cronExpression: string, actionToken: string, actionParams: unknown, timezone?: string) => void,
 ): RecoverResult {
 	if (!options?.storage) {
 		return { recovered: false, restoredTasks: 0, restoredFailures: 0 };
@@ -168,13 +136,10 @@ export function recoverSchedulerState(
 	const restored = restoreSchedulerState(
 		snapshot,
 		existingTaskIds,
-		scheduleEventOnce,
-		scheduleEventInterval,
-		scheduleEventCron,
 		failures,
-		scheduleActionOnce,
-		scheduleActionInterval,
-		scheduleActionCron,
+		scheduleOnceAction,
+		scheduleIntervalAction,
+		scheduleCronAction,
 	);
 
 	return {

@@ -15,10 +15,11 @@
     "main": "npx tsx src/main.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.73.0",
+    "@context-ai/agent": "*",
     "@context-ai/core": "*",
     "@mariozechner/pi-agent-core": "^0.56.0",
     "@mariozechner/pi-ai": "^0.56.0",
-    "@context-ai/agent": "*",
     "cron-parser": "^4.9.0",
     "openai": "^6.26.0"
   },

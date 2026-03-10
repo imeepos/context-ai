@@ -2,6 +2,7 @@ import { Type, type Static } from "@sinclair/typebox";
 import type { Action, Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
 import { SchedulerService } from "../core/scheduler.js";
+import { ACTION_EXECUTER } from "../tokens.js";
 
 // ============================================================================
 // Scheduler State Recover Action - 请求/响应 Schema 定义
@@ -87,7 +88,8 @@ export const schedulerStateRecoverAction: Action<
 		_params: SchedulerStateRecoverRequest,
 		injector: Injector,
 	): Promise<SchedulerStateRecoverResponse> => {
+		const actionExecuter = injector.get(ACTION_EXECUTER);
 		const scheduler = injector.get(SchedulerService);
-		return scheduler.recoverState();
+		return scheduler.recoverState(injector, actionExecuter);
 	},
 };

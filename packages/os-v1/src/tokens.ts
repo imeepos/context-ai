@@ -87,7 +87,7 @@ export interface Page<TParameters extends TSchema = TSchema> {
  * @template Props - 组件属性类型
  */
 export interface ComponentFactory<Props> {
-    (props: Props, injector: Injector): Promise<JSXElement>;
+    (props: Props, injector: Injector): Promise<JSXElement | string>;
 }
 
 // ============================================================================
@@ -300,7 +300,7 @@ export const SESSION_ID = new InjectionToken<string>(`SESSION_ID`)
 // Session Logger Token
 // ============================================================================
 
-import type { SessionLogger } from "./core/session-logger.js";
+import type { ISessionLogger } from "./core/session-logger.js";
 import type { SchedulerService } from "./core/scheduler.js";
 
 /**
@@ -308,7 +308,7 @@ import type { SchedulerService } from "./core/scheduler.js";
  *
  * 用于注入当前会话的日志记录器实例
  */
-export const SESSION_LOGGER = new InjectionToken<SessionLogger>("SESSION_LOGGER");
+export const SESSION_LOGGER = new InjectionToken<ISessionLogger>("SESSION_LOGGER");
 
 /**
  * SchedulerService 注入令牌

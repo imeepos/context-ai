@@ -5,6 +5,7 @@
 ## [必须执行] 做plan计划文件时
 
 - 注意将计划文件放到 docs/plans/xxx/xxx.md
+- 所有的 Token 应该面向接口而不是实现
 
 ## 当编写Action时
 

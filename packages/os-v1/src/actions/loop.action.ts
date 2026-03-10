@@ -428,6 +428,7 @@ export const loopRequestAction: Action<typeof LoopRequestRequestSchema, typeof L
                 logger.info('LOOP_ACTION', '========== EXECUTION SUMMARY ==========', {
                     success: result.success,
                     error: result.error,
+                    output: result.output,
                     totalDuration: `${totalDuration}ms`,
                     totalTurns: turnIndex,
                     totalApiCalls: apiCalls.length,

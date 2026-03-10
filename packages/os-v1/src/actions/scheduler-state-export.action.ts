@@ -26,8 +26,8 @@ export const SchedulerPersistedTaskSchema = Type.Object({
 	type: Type.Union([Type.Literal("once"), Type.Literal("interval"), Type.Literal("cron")], {
 		description: "Task type",
 	}),
-	topic: Type.String({ description: "Event topic" }),
-	payload: Type.Optional(Type.Unknown({ description: "Event payload" })),
+	actionToken: Type.String({ description: "Action token to execute when task triggers" }),
+	actionParams: Type.Unknown({ description: "Parameters to pass to the action" }),
 	runAt: Type.Optional(Type.String({ description: "Execution time (ISO 8601) for 'once' type" })),
 	intervalMs: Type.Optional(Type.Number({ description: "Interval in milliseconds for 'interval' type" })),
 	maxRuns: Type.Optional(Type.Number({ description: "Maximum runs for 'interval' type" })),

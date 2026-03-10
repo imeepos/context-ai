@@ -96,7 +96,7 @@ export const schedulerScheduleIntervalAction: Action<
 		const scheduler = injector.get(SchedulerService);
 		const actionExecuter = injector.get<ActionExecuter>(ACTION_EXECUTER);
 		const options = params.maxRuns !== undefined ? { maxRuns: params.maxRuns } : undefined;
-		scheduler.scheduleActionInterval(params.id, params.intervalMs, params.actionToken, params.actionParams, injector, actionExecuter, options);
+		scheduler.scheduleIntervalAction(params.id, params.intervalMs, params.actionToken, params.actionParams, injector, actionExecuter, options);
 		return { scheduled: true };
 	},
 };

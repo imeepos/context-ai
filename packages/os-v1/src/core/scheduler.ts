@@ -1,6 +1,6 @@
 /**
  * Scheduler Service
- * 核心调度器服务 - 支持一次性、间隔、Cron 任务调度
+ * 核心调度器服务 - 支持 Action 任务调度（一次性、间隔、Cron）
  */
 
 import { Injectable, Optional, Injector } from "@context-ai/core";
@@ -23,9 +23,9 @@ import type { Static, TSchema } from "@mariozechner/pi-ai";
  * 调度器服务
  *
  * 核心功能：
- * - 一次性任务调度（scheduleOnce）
- * - 间隔任务调度（scheduleInterval）
- * - Cron 任务调度（scheduleCron）- 新增
+ * - 一次性 Action 任务调度（scheduleActionOnce）
+ * - 间隔 Action 任务调度（scheduleActionInterval）
+ * - Cron Action 任务调度（scheduleActionCron）
  * - 可重试任务调度（scheduleRetryable）
  * - 任务取消（cancel）
  * - 失败追踪和重放（failures, replay）
@@ -50,16 +50,9 @@ export class SchedulerService {
 	) { }
 
 	/**
-	 * 发布事件到事件总线
+	 * 调度间隔任务（内部方法）
 	 */
-	publishEvent(topic: string, payload?: unknown): void {
-		this.eventBus?.publish(topic, payload ?? null);
-	}
-
-	/**
-	 * 调度间隔任务
-	 */
-	scheduleInterval(id: string, intervalMs: number, fn: () => void, options?: { maxRuns?: number }): void {
+	private scheduleInterval(id: string, intervalMs: number, fn: () => void, options?: { maxRuns?: number }): void {
 		if (this.tasks.has(id)) {
 			throw new Error(`Task already exists: ${id}`);
 		}
@@ -74,13 +67,12 @@ export class SchedulerService {
 		}, intervalMs);
 
 		this.tasks.set(id, { stop: () => clearInterval(timer) });
-		this.persistIfNeeded();
 	}
 
 	/**
-	 * 调度一次性任务
+	 * 调度一次性任务（内部方法）
 	 */
-	scheduleOnce(id: string, delayMs: number, fn: () => void): void {
+	private scheduleOnce(id: string, delayMs: number, fn: () => void): void {
 		if (this.tasks.has(id)) {
 			throw new Error(`Task already exists: ${id}`);
 		}
@@ -93,161 +85,10 @@ export class SchedulerService {
 		}, delayMs);
 
 		this.tasks.set(id, { stop: () => clearTimeout(timer) });
-		this.persistIfNeeded();
-	}
-
-	/**
-	 * 调度基于事件的一次性任务
-	 */
-	scheduleEventOnce(id: string, delayMs: number, topic: string, payload?: unknown): void {
-		const runAt = Date.now() + delayMs;
-		this.persistedTasks.set(id, {
-			id,
-			type: "once",
-			topic,
-			payload,
-			runAt: new Date(runAt).toISOString(),
-		});
-		this.persistIfNeeded();
-
-		this.scheduleOnce(id, delayMs, () => {
-			this.publishEvent(topic, payload);
-			this.persistedTasks.delete(id);
-			this.persistIfNeeded();
-		});
-	}
-
-	/**
-	 * 调度基于事件的间隔任务
-	 */
-	scheduleEventInterval(
-		id: string,
-		intervalMs: number,
-		topic: string,
-		payload?: unknown,
-		options?: { maxRuns?: number },
-	): void {
-		let runs = 0;
-		this.persistedTasks.set(id, {
-			id,
-			type: "interval",
-			topic,
-			payload,
-			intervalMs,
-			maxRuns: options?.maxRuns,
-			runs: 0,
-		});
-		this.persistIfNeeded();
-
-		this.scheduleInterval(
-			id,
-			intervalMs,
-			() => {
-				runs += 1;
-				this.publishEvent(topic, payload);
-				const entry = this.persistedTasks.get(id);
-				if (entry) {
-					entry.runs = runs;
-					this.persistedTasks.set(id, entry);
-					this.persistIfNeeded();
-				}
-			},
-			options,
-		);
-	}
-
-	/**
-	 * 调度基于 Cron 表达式的任务
-	 *
-	 * @param id 任务 ID
-	 * @param cronExpression Cron 表达式（如 "0 0 * * *" 表示每天午夜）
-	 * @param topic 事件主题
-	 * @param payload 事件负载
-	 * @param timezone 时区（可选，默认使用系统时区）
-	 */
-	scheduleEventCron(
-		id: string,
-		cronExpression: string,
-		topic: string,
-		payload?: unknown,
-		timezone?: string,
-	): void {
-		if (this.tasks.has(id)) {
-			throw new Error(`Task already exists: ${id}`);
-		}
-
-		// 验证 cron 表达式并计算下次执行时间
-		let nextRun: Date;
-		try {
-			const interval = cronParser.parseExpression(cronExpression, {
-				tz: timezone || this.options?.defaultTimezone || undefined,
-			});
-			nextRun = interval.next().toDate();
-		} catch (error) {
-			throw new Error(`Invalid cron expression: ${cronExpression}`);
-		}
-
-		const nextRunAt = nextRun.toISOString();
-
-		// 持久化 cron 任务
-		this.persistedTasks.set(id, {
-			id,
-			type: "cron",
-			topic,
-			payload,
-			cronExpression,
-			timezone: timezone || this.options?.defaultTimezone,
-			nextRunAt,
-		});
-		this.persistIfNeeded();
-
-		// 自调度函数：执行任务并调度下一次
-		const scheduleSelf = (): void => {
-			// 执行任务
-			this.publishEvent(topic, payload);
-
-			// 更新上次执行时间
-			const now = new Date().toISOString();
-			const task = this.persistedTasks.get(id);
-			if (task) {
-				task.lastRunAt = now;
-			}
-
-			// 计算并调度下次执行
-			try {
-				const nextInterval = cronParser.parseExpression(cronExpression, {
-					currentDate: new Date(),
-					tz: timezone || this.options?.defaultTimezone || undefined,
-				});
-				const nextExecution = nextInterval.next().toDate();
-				const delayMs = nextExecution.getTime() - Date.now();
-
-				// 更新下次执行时间
-				if (task) {
-					task.nextRunAt = nextExecution.toISOString();
-					this.persistedTasks.set(id, task);
-					this.persistIfNeeded();
-				}
-
-				// 调度下次执行
-				const timer = setTimeout(scheduleSelf, delayMs);
-				this.tasks.set(id, { stop: () => clearTimeout(timer) });
-			} catch (error) {
-				// Cron 表达式解析失败，停止任务
-				this.tasks.delete(id);
-				this.persistedTasks.delete(id);
-				this.persistIfNeeded();
-			}
-		};
-
-		// 调度首次执行
-		const initialDelayMs = nextRun.getTime() - Date.now();
-		const timer = setTimeout(scheduleSelf, initialDelayMs);
-		this.tasks.set(id, { stop: () => clearTimeout(timer) });
 	}
 
 	// ============================================================================
-	// Action 执行方法（新增）
+	// Action 执行方法
 	// ============================================================================
 
 	/**
@@ -291,7 +132,7 @@ export class SchedulerService {
 	}
 
 	/**
-	 * 调度基于 Action 的一次性任务
+	 * 调度一次性 Action 任务
 	 *
 	 * @param id 任务 ID
 	 * @param delayMs 延迟时间（毫秒）
@@ -300,7 +141,7 @@ export class SchedulerService {
 	 * @param injector DI 注入器（用于执行 Action）
 	 * @param actionExecuter Action 执行器
 	 */
-	scheduleActionOnce(
+	scheduleOnceAction(
 		id: string,
 		delayMs: number,
 		actionToken: string,
@@ -316,7 +157,6 @@ export class SchedulerService {
 		this.persistedTasks.set(id, {
 			id,
 			type: "once",
-			topic: `action:${actionToken}`,
 			actionToken,
 			actionParams,
 			runAt: new Date(runAt).toISOString(),
@@ -333,7 +173,7 @@ export class SchedulerService {
 	}
 
 	/**
-	 * 调度基于 Action 的间隔任务
+	 * 调度间隔 Action 任务
 	 *
 	 * @param id 任务 ID
 	 * @param intervalMs 间隔时间（毫秒）
@@ -343,7 +183,7 @@ export class SchedulerService {
 	 * @param actionExecuter Action 执行器
 	 * @param options 可选配置
 	 */
-	scheduleActionInterval(
+	scheduleIntervalAction(
 		id: string,
 		intervalMs: number,
 		actionToken: string,
@@ -360,7 +200,6 @@ export class SchedulerService {
 		this.persistedTasks.set(id, {
 			id,
 			type: "interval",
-			topic: `action:${actionToken}`,
 			actionToken,
 			actionParams,
 			intervalMs,
@@ -387,7 +226,7 @@ export class SchedulerService {
 	}
 
 	/**
-	 * 调度基于 Action 的 Cron 任务
+	 * 调度 Cron Action 任务
 	 *
 	 * @param id 任务 ID
 	 * @param cronExpression Cron 表达式（如 "0 0 * * *" 表示每天午夜）
@@ -397,7 +236,7 @@ export class SchedulerService {
 	 * @param actionExecuter Action 执行器
 	 * @param timezone 时区（可选，默认使用系统时区）
 	 */
-	scheduleActionCron(
+	scheduleCronAction(
 		id: string,
 		cronExpression: string,
 		actionToken: string,
@@ -431,7 +270,6 @@ export class SchedulerService {
 		this.persistedTasks.set(id, {
 			id,
 			type: "cron",
-			topic: `action:${actionToken}`,
 			actionToken,
 			actionParams,
 			cronExpression,
@@ -634,17 +472,24 @@ export class SchedulerService {
 	/**
 	 * 恢复调度器状态
 	 */
-	restoreState(snapshot: { tasks?: SchedulerPersistedTask[]; failures?: SchedulerFailureRecord[] }): {
+	restoreState(
+		snapshot: { tasks?: SchedulerPersistedTask[]; failures?: SchedulerFailureRecord[] },
+		injector: Injector,
+		actionExecuter: ActionExecuter,
+	): {
 		restoredTasks: number;
 		restoredFailures: number;
 	} {
 		return restoreSchedulerState(
 			snapshot,
 			new Set(this.tasks.keys()),
-			(id, delayMs, topic, payload) => this.scheduleEventOnce(id, delayMs, topic, payload),
-			(id, intervalMs, topic, payload, maxRuns) => this.scheduleEventInterval(id, intervalMs, topic, payload, { maxRuns }),
-			(id, cronExpression, topic, payload, timezone) => this.scheduleEventCron(id, cronExpression, topic, payload, timezone),
 			this.failures,
+			(id, delayMs, actionToken, actionParams) =>
+				this.scheduleOnceAction(id, delayMs, actionToken, actionParams, injector, actionExecuter),
+			(id, intervalMs, actionToken, actionParams, maxRuns) =>
+				this.scheduleIntervalAction(id, intervalMs, actionToken, actionParams, injector, actionExecuter, { maxRuns }),
+			(id, cronExpression, actionToken, actionParams, timezone) =>
+				this.scheduleCronAction(id, cronExpression, actionToken, actionParams, injector, actionExecuter, timezone),
 		);
 	}
 
@@ -658,14 +503,20 @@ export class SchedulerService {
 	/**
 	 * 从存储恢复状态
 	 */
-	recoverState(): { recovered: boolean; restoredTasks: number; restoredFailures: number } {
+	recoverState(
+		injector: Injector,
+		actionExecuter: ActionExecuter,
+	): { recovered: boolean; restoredTasks: number; restoredFailures: number } {
 		return recoverSchedulerState(
 			this.options,
 			new Set(this.tasks.keys()),
-			(id, delayMs, topic, payload) => this.scheduleEventOnce(id, delayMs, topic, payload),
-			(id, intervalMs, topic, payload, maxRuns) => this.scheduleEventInterval(id, intervalMs, topic, payload, { maxRuns }),
-			(id, cronExpression, topic, payload, timezone) => this.scheduleEventCron(id, cronExpression, topic, payload, timezone),
 			this.failures,
+			(id, delayMs, actionToken, actionParams) =>
+				this.scheduleOnceAction(id, delayMs, actionToken, actionParams, injector, actionExecuter),
+			(id, intervalMs, actionToken, actionParams, maxRuns) =>
+				this.scheduleIntervalAction(id, intervalMs, actionToken, actionParams, injector, actionExecuter, { maxRuns }),
+			(id, cronExpression, actionToken, actionParams, timezone) =>
+				this.scheduleCronAction(id, cronExpression, actionToken, actionParams, injector, actionExecuter, timezone),
 		);
 	}
 

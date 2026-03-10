@@ -1,5 +1,5 @@
 import { Type, type Static } from "@sinclair/typebox";
-import type { Action, Token } from "../tokens.js";
+import { ACTION_EXECUTER, type Action, type ActionExecuter, type Token } from "../tokens.js";
 import type { Injector } from "@context-ai/core";
 import { SchedulerService } from "../core/scheduler.js";
 import {
@@ -91,7 +91,8 @@ export const schedulerStateImportAction: Action<
 		params: SchedulerStateImportRequest,
 		injector: Injector,
 	): Promise<SchedulerStateImportResponse> => {
+		const actionExecuter: ActionExecuter = injector.get(ACTION_EXECUTER);
 		const scheduler = injector.get(SchedulerService);
-		return scheduler.restoreState(params);
+		return scheduler.restoreState(params, injector, actionExecuter);
 	},
 };

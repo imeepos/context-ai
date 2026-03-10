@@ -102,3 +102,82 @@ export function exportSchedulerState(
 		failures: [...failures],
 	};
 }
+
+/**
+ * 内存存储适配器（用于单元测试）
+ *
+ * 将调度器状态存储在内存中，不依赖文件系统。
+ * 提供测试辅助方法用于验证状态。
+ */
+export class MemorySchedulerStateAdapter implements SchedulerStateStorageAdapter {
+	private snapshot: SchedulerStateSnapshot | undefined;
+
+	/**
+	 * 创建内存存储适配器
+	 *
+	 * @param initialSnapshot - 可选的初始状态
+	 */
+	constructor(initialSnapshot?: SchedulerStateSnapshot) {
+		if (initialSnapshot) {
+			this.snapshot = {
+				tasks: [...initialSnapshot.tasks],
+				failures: [...initialSnapshot.failures],
+			};
+		}
+	}
+
+	load(): SchedulerStateSnapshot | undefined {
+		if (!this.snapshot) {
+			return undefined;
+		}
+		return {
+			tasks: [...this.snapshot.tasks],
+			failures: [...this.snapshot.failures],
+		};
+	}
+
+	save(snapshot: SchedulerStateSnapshot): void {
+		this.snapshot = {
+			tasks: [...snapshot.tasks],
+			failures: [...snapshot.failures],
+		};
+	}
+
+	/**
+	 * 获取当前存储的任务数量
+	 */
+	getTaskCount(): number {
+		return this.snapshot?.tasks.length ?? 0;
+	}
+
+	/**
+	 * 获取当前存储的失败记录数量
+	 */
+	getFailureCount(): number {
+		return this.snapshot?.failures.length ?? 0;
+	}
+
+	/**
+	 * 检查是否为空
+	 */
+	isEmpty(): boolean {
+		return !this.snapshot || (this.snapshot.tasks.length === 0 && this.snapshot.failures.length === 0);
+	}
+
+	/**
+	 * 清空存储
+	 */
+	clear(): void {
+		this.snapshot = undefined;
+	}
+
+	/**
+	 * 获取当前快照的副本
+	 */
+	getSnapshot(): SchedulerStateSnapshot | undefined {
+		return this.snapshot ? {
+			tasks: [...this.snapshot.tasks],
+			failures: [...this.snapshot.failures],
+		} : undefined;
+	}
+}

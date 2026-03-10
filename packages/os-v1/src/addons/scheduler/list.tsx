@@ -3,7 +3,7 @@ import type { ComponentFactory } from '../../tokens.js';
 import type { Injector } from '@context-ai/core';
 import * as jsx from '@context-ai/ctp';
 import { Context, Text, Data, Group, Tool } from '@context-ai/ctp';
-import { SCHEDULER_SERVICE } from '../../tokens.js';
+import { SCHEDULER_SERVICE, ACTION_EXECUTER } from '../../tokens.js';
 import { SchedulerService } from '../../core/scheduler.js';
 
 export const ListPropsSchema = Type.Object({
@@ -18,6 +18,7 @@ export type ListProps = Static<typeof ListPropsSchema>;
 
 export const ListFactory: ComponentFactory<ListProps> = async (props: ListProps, injector: Injector) => {
     const scheduler = injector.get(SCHEDULER_SERVICE) ?? injector.get(SchedulerService);
+    const actionExecuter = injector.get(ACTION_EXECUTER);
 
     if (!scheduler) {
         return (
@@ -40,7 +41,7 @@ export const ListFactory: ComponentFactory<ListProps> = async (props: ListProps,
     const tableData = tasks.map(task => ({
         id: task.id,
         type: task.type,
-        topic: task.topic,
+        actionToken: task.actionToken,
         nextRunAt: task.nextRunAt ?? task.runAt ?? '-',
         status: 'active'
     }));
@@ -62,7 +63,7 @@ export const ListFactory: ComponentFactory<ListProps> = async (props: ListProps,
                     <Data
                         source={tableData}
                         format="table"
-                        fields={['id', 'type', 'topic', 'nextRunAt', 'status']}
+                        fields={['id', 'type', 'actionToken', 'nextRunAt', 'status']}
                         title={`Scheduled Tasks (${tableData.length})`}
                     />
                 ) : (
@@ -107,7 +108,7 @@ export const ListFactory: ComponentFactory<ListProps> = async (props: ListProps,
                                         details: null
                                     };
                                 }
-                                scheduler.scheduleEventOnce(params.id, params.delayMs, params.topic, parsedPayload);
+                                scheduler.scheduleOnceAction(params.id, params.delayMs, params.topic, parsedPayload, injector, actionExecuter);
                                 break;
 
                             case 'interval':
@@ -117,11 +118,13 @@ export const ListFactory: ComponentFactory<ListProps> = async (props: ListProps,
                                         details: null
                                     };
                                 }
-                                scheduler.scheduleEventInterval(
+                                scheduler.scheduleIntervalAction(
                                     params.id,
                                     params.intervalMs,
                                     params.topic,
                                     parsedPayload,
+                                    injector,
+                                    actionExecuter,
                                     params.maxRuns ? { maxRuns: params.maxRuns } : undefined
                                 );
                                 break;
@@ -133,11 +136,13 @@ export const ListFactory: ComponentFactory<ListProps> = async (props: ListProps,
                                         details: null
                                     };
                                 }
-                                scheduler.scheduleEventCron(
+                                scheduler.scheduleCronAction(
                                     params.id,
                                     params.cronExpression,
                                     params.topic,
                                     parsedPayload,
+                                    injector,
+                                    actionExecuter,
                                     params.timezone
                                 );
                                 break;

@@ -45,23 +45,19 @@ export interface RetryableTaskDefinition {
 export type PersistedTaskType = "once" | "interval" | "cron";
 
 /**
- * 持久化任务数据
+ * 持久化任务数据（仅支持 Action 任务）
  */
 export interface SchedulerPersistedTask {
 	/** 任务 ID */
 	id: string;
 	/** 任务类型 */
 	type: PersistedTaskType;
-	/** 事件主题 */
-	topic: string;
-	/** 事件负载 */
-	payload?: unknown;
 
-	// Action 执行相关字段（新增）
+	// Action 执行相关字段
 	/** 要执行的 Action token */
-	actionToken?: string;
+	actionToken: string;
 	/** Action 请求参数 */
-	actionParams?: unknown;
+	actionParams: unknown;
 
 	// 一次性任务字段
 	/** 执行时间 (ISO 8601) - 用于 "once" 类型 */

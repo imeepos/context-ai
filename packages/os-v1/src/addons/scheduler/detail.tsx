@@ -49,7 +49,7 @@ export const ListFactory: ComponentFactory<DetailProps> = async (props: DetailPr
     const basicInfo = {
         id: task.id,
         type: task.type,
-        topic: task.topic,
+        actionToken: task.actionToken,
         status: 'active'
     };
 
@@ -74,9 +74,9 @@ export const ListFactory: ComponentFactory<DetailProps> = async (props: DetailPr
             break;
     }
 
-    const payloadInfo = task.payload
-        ? (typeof task.payload === 'string' ? task.payload : JSON.stringify(task.payload, null, 2))
-        : 'No payload';
+    const actionParamsInfo = task.actionParams
+        ? (typeof task.actionParams === 'string' ? task.actionParams : JSON.stringify(task.actionParams, null, 2))
+        : 'No parameters';
 
     return (
         <Context
@@ -92,7 +92,7 @@ export const ListFactory: ComponentFactory<DetailProps> = async (props: DetailPr
                 <Data
                     source={[basicInfo]}
                     format="table"
-                    fields={['id', 'type', 'topic', 'status']}
+                    fields={['id', 'type', 'actionToken', 'status']}
                     title="Task Basic Info"
                 />
             </Group>
@@ -106,8 +106,8 @@ export const ListFactory: ComponentFactory<DetailProps> = async (props: DetailPr
                 />
             </Group>
 
-            <Group title="Payload">
-                <Text>{payloadInfo}</Text>
+            <Group title="Action Parameters">
+                <Text>{actionParamsInfo}</Text>
             </Group>
         </Context>
     );

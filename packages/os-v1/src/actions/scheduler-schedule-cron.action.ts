@@ -102,7 +102,7 @@ export const schedulerScheduleCronAction: Action<
 	execute: async (params: SchedulerScheduleCronRequest, injector: Injector): Promise<SchedulerScheduleCronResponse> => {
 		const scheduler = injector.get(SchedulerService);
 		const actionExecuter = injector.get<ActionExecuter>(ACTION_EXECUTER);
-		scheduler.scheduleActionCron(params.id, params.cronExpression, params.actionToken, params.actionParams, injector, actionExecuter, params.timezone);
+		scheduler.scheduleCronAction(params.id, params.cronExpression, params.actionToken, params.actionParams, injector, actionExecuter, params.timezone);
 		return { scheduled: true };
 	},
 };

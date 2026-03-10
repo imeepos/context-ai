@@ -1,72 +1,121 @@
-# Findings: Loop Action Analysis
+# Findings: EventBus and ActionExecuter Issues
 
-## Current Implementation Issues
+## Critical Bug #1: EventBus Wildcard Subscription Overwrite
 
-### 1. Agent Result Not Captured
+**Location:** `packages/os-v1/src/core/event-bus.ts:71`
+
 ```typescript
-await agent.prompt(params.prompt, [])
-// 返回值被忽略了
+this.wildcardHandlers.set(topic, wrappedHandler);
 ```
 
-### 2. Response Schema Too Simple
+**Problem:**
+- Map.set() overwrites the previous value
+- Only ONE handler can exist per wildcard pattern
+- Multiple calls to `subscribe("scheduler.*", handler)` will only keep the LAST handler
+
+**Evidence from main.ts:**
 ```typescript
-export const LoopRequestResponseSchema = Type.Object({
-    ok: Type.Boolean({ description: "HTTP status code" })
-});
+// Line 27: First subscription
+eventBus.subscribe("scheduler.action.succeeded", (payload) => { ... })
+
+// Line 50: Second subscription
+eventBus.subscribe("scheduler.action.failed", (payload) => { ... })
 ```
-只返回 ok 状态，没有实际的 agent 执行结果。
 
-### 3. Missing Error Handling
-没有 try-catch，如果 agent 执行失败会导致未捕获的异常。
-
-### 4. Naming Inconsistency
-- Token 名称: `NET_REQUEST_TOKEN`
-- Permission 名称: `Loop_REQUEST_PERMISSION`
-- 但实际功能是 loop/agent 执行，不是网络请求
-
-## Dependencies Analysis
-
-### 1. Agent.prompt() Return Type
-从 `@mariozechner/pi-agent-core/dist/agent.d.ts:143-144` 可以看到：
+These are different topics, so they work. But if you called:
 ```typescript
-prompt(message: AgentMessage | AgentMessage[]): Promise<void>;
-prompt(input: string, images?: ImageContent[]): Promise<void>;
+eventBus.subscribe("scheduler.*", handler1)
+eventBus.subscribe("scheduler.*", handler2)  // OVERWRITES handler1!
 ```
-**关键发现**: `agent.prompt()` 返回 `Promise<void>`，不直接返回执行结果。
 
-### 2. Agent Event System
-Agent 使用事件系统来传递执行结果：
-- `agent.subscribe(fn: (e: AgentEvent) => void)` - 订阅事件
-- 需要通过事件监听器捕获 agent 的输出和状态
+**Impact:**
+- High severity for wildcard patterns
+- Normal topics (without *) work correctly via EventEmitter.on()
+- Affects any code using wildcard subscriptions
 
-### 3. PageFactory.create() Return Type
-从 `tokens.ts:125` 可以看到：
+## Critical Bug #2: ActionExecuter Execution Opacity
+
+**Location:** `packages/os-v1/src/action-executer.ts:131-164`
+
+**Problem:**
+- execute() method is a black box
+- No way to observe:
+  - When execution starts
+  - Progress during execution
+  - Intermediate results
+  - Completion status
+- External code must wait for Promise resolution
+
+**Current Flow:**
+```
+execute() called → [OPAQUE] → Promise resolves
+```
+
+**Desired Flow:**
+```
+execute() called → START event → PROGRESS events → COMPLETE/ERROR event
+```
+
+**Impact:**
+- Cannot build progress UIs
+- Cannot cancel long-running actions
+- Cannot monitor execution health
+- Difficult to debug action chains
+
+## Root Cause Analysis
+
+Both issues stem from the same architectural problem:
+- **EventBus**: Using Map instead of multi-subscriber pattern
+- **ActionExecuter**: No event emission architecture
+
+## Solution: RxJS Integration
+
+RxJS provides:
+1. **Subject**: Multi-subscriber event streams
+2. **Observable**: Reactive data flow
+3. **Operators**: Transform, filter, combine streams
+4. **Backpressure**: Handle fast producers
+
+### EventBus Fix
 ```typescript
-create<TParameters extends TSchema = TSchema>(
-  params: Static<TParameters>,
-  injector: Injector
-): Promise<RenderedContext>
+private readonly subjects = new Map<string, Subject<unknown>>();
+
+subscribe(topic: string, handler: (payload: unknown) => void): () => void {
+  if (!this.subjects.has(topic)) {
+    this.subjects.set(topic, new Subject());
+  }
+
+  const subscription = this.subjects.get(topic)!.subscribe(handler);
+  return () => subscription.unsubscribe();
+}
 ```
-返回 `RenderedContext` 类型，包含 `prompt` 和 `tools`。
 
-### 4. Error Handling Pattern
-参考 `net-request.action.ts:114-156`：
-- 使用 try-catch 包裹执行逻辑
-- 支持重试机制
-- 最后抛出详细错误信息
+### ActionExecuter Fix
+```typescript
+async execute(...): Promise<...> {
+  this.eventBus.publish('action.started', { token, params });
 
-## Design Decisions
+  try {
+    const result = await action.execute(params, injector);
+    this.eventBus.publish('action.completed', { token, result });
+    return result;
+  } catch (error) {
+    this.eventBus.publish('action.failed', { token, error });
+    throw error;
+  }
+}
+```
 
-### Response Schema 设计
-应该包含：
-1. `success: boolean` - 执行是否成功
-2. `output?: string` - Agent 的文本输出
-3. `error?: string` - 错误信息（如果失败）
-4. `toolCalls?: number` - 工具调用次数（可选）
+## Testing Strategy
 
-### Agent Result Capture Strategy
-由于 `agent.prompt()` 返回 void，需要：
-1. 使用 `agent.subscribe()` 订阅事件
-2. 收集 assistant 消息作为输出
-3. 监听错误事件
-4. 等待 agent 完成（使用 `agent.waitForIdle()`）
+### EventBus Tests
+- Multiple subscriptions to same topic
+- Multiple subscriptions to same wildcard pattern
+- Verify all handlers receive events
+- Verify unsubscribe works correctly
+
+### ActionExecuter Tests
+- Subscribe to execution events
+- Verify event order: started → completed/failed
+- Verify event payloads contain correct data
+- Test with successful and failing actions

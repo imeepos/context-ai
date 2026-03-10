@@ -8,6 +8,7 @@ export * from './actions/shell-env-set.action.js';
 export * from './actions/shell-env-list.action.js';
 export * from './actions/shell-env-unset.action.js';
 export * from './actions/loop.action.js'
+export * from './actions/system-heartbeat.action.js'
 export * from './core/session-logger.js'
 /**
  * 系统级

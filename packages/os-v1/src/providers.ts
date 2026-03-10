@@ -4,7 +4,6 @@ import {
     ACTIONS,
     APPLICATION_LOADER,
     CURRENT_DIR,
-    LOG_DIR,
     PROJECT_ROOT,
     ROOT_DIR,
     SHELL_PID_DIR,
@@ -48,13 +47,15 @@ import { EventBusService } from "./core/event-bus.js";
 import { ApplicationLoaderLocal } from "./core/ApplicationLoaderLocal.js";
 import { ApplicationLoaderSystem } from "./core/ApplicationLoaderSystem.js";
 import { LOOP_REQUEST_TOKEN, loopRequestAction } from "./actions/loop.action.js";
+import { systemHeartbeatAction } from "./actions/system-heartbeat.action.js";
+import { codexAction } from "./actions/codex.action.js";
+import { claudeAction } from "./actions/claude.action.js";
 
 export const providers: Provider[] = [
     // 路径常量注册
     { provide: ROOT_DIR, useValue: join(homedir(), '.context-ai') },
     { provide: SHELL_SESSION_DIR, useFactory: (root: string) => join(root, 'shell', 'sessions'), deps: [ROOT_DIR] },
     { provide: SHELL_PID_DIR, useFactory: (root: string) => join(root, 'shell', 'pids'), deps: [ROOT_DIR] },
-    { provide: LOG_DIR, useFactory: (root: string) => join(root, 'logs'), deps: [ROOT_DIR] },
     { provide: CURRENT_DIR, useValue: process.cwd() },
     { provide: PROJECT_ROOT, useValue: join(__dirname, '../../../') },
     // Action 注册
@@ -252,5 +253,26 @@ export const providers: Provider[] = [
         deps: [ACTIONS]
     },
     { provide: LOOP_REQUEST_TOKEN, useValue: loopRequestAction },
-    { provide: ACTIONS, useValue: loopRequestAction, multi: true }
+    { provide: ACTIONS, useValue: loopRequestAction, multi: true },
+    // System Heartbeat Action 注册
+    {
+        provide: ACTIONS,
+        useValue: systemHeartbeatAction,
+        multi: true
+    },
+    { provide: systemHeartbeatAction.type, useValue: systemHeartbeatAction },
+    // Codex Action 注册
+    {
+        provide: ACTIONS,
+        useValue: codexAction,
+        multi: true
+    },
+    { provide: codexAction.type, useValue: codexAction },
+    // Claude Action 注册
+    {
+        provide: ACTIONS,
+        useValue: claudeAction,
+        multi: true
+    },
+    { provide: claudeAction.type, useValue: claudeAction }
 ]

@@ -89,7 +89,7 @@ export const schedulerScheduleOnceAction: Action<
 	execute: async (params: SchedulerScheduleOnceRequest, injector: Injector): Promise<SchedulerScheduleOnceResponse> => {
 		const scheduler = injector.get(SchedulerService);
 		const actionExecuter = injector.get<ActionExecuter>(ACTION_EXECUTER);
-		scheduler.scheduleActionOnce(params.id, params.delayMs, params.actionToken, params.actionParams, injector, actionExecuter);
+		scheduler.scheduleOnceAction(params.id, params.delayMs, params.actionToken, params.actionParams, injector, actionExecuter);
 		return { scheduled: true };
 	},
 };
