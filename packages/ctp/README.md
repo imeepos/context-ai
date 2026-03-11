@@ -57,14 +57,10 @@ const WeatherAgent = (
     <Tool
       name="get_weather"
       description="获取指定城市的天气信息"
-      parameters={{
-        type: 'object',
-        properties: {
-          city: { type: 'string', description: '城市名称' },
-          unit: { type: 'string', enum: ['celsius', 'fahrenheit'] }
-        },
-        required: ['city']
-      }}
+      parameters={Type.Object({
+        city: Type.String({ description: '城市名称' }),
+        unit: Type.Optional(Type.Enum(['celsius', 'fahrenheit']))
+      })}
       execute={async (params) => {
         // 实际的天气查询逻辑
         return { temperature: 22, condition: 'sunny' };
@@ -161,14 +157,10 @@ console.log(ctx.dataViews); // 数据视图
 <Tool
   name="search_docs"
   description="搜索文档库"
-  parameters={{
-    type: 'object',
-    properties: {
-      query: { type: 'string' },
-      limit: { type: 'number' }
-    },
-    required: ['query']
-  }}
+  parameters={Type.Object({
+    query: Type.String({ description: '搜索关键词' }),
+    limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 100 }))
+  })}
   execute={async (params) => {
     // 工具执行逻辑
     return results;

@@ -53,6 +53,8 @@ import { appTestAction } from "./actions/app-test.action.js";
 import { appUninstallAction } from "./actions/app-uninstall.action.js";
 import { appUpgradeAction } from "./actions/app-upgrade.action.js";
 import { bowongModelActions } from "./actions/bowong/index.js";
+import { TypeormFactory } from "./orm.js";
+import { DataSource } from "typeorm";
 
 export const platformProviders: Provider[] = [
     // 路径常量注册
@@ -263,4 +265,6 @@ export const applicationProviders: Provider[] = [
         { provide: ACTIONS, useValue: action, multi: true },
         { provide: action.type, useValue: action },
     ])),
+    { provide: TypeormFactory, useClass: TypeormFactory },
+    { provide: DataSource, useFactory: (factory: TypeormFactory) => factory.create(), deps: [TypeormFactory] }
 ]

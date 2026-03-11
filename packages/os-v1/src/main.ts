@@ -1,11 +1,8 @@
-﻿import {
-    LOOP_REQUEST_TOKEN,
-} from "./index.js";
+﻿import "reflect-metadata";
+
 import { ShellSessionStore } from "./core/shell-session.js";
 import { bootstrap } from "./bootstrap.js";
-import { createSchedulerInjector, type Task, type Workflow } from "./core/scheduler.injector.js";
 import { getCliOption } from "./getCliOption.js";
-
 
 export async function master() {
     const logPattern = getCliOption("log");
@@ -22,30 +19,6 @@ export async function master() {
             `sessionId=${sessionId} sessionFile=${shellSessionStore.sessionFile}`,
         );
     }
-    const task: Task = {
-        id: crypto.randomUUID() as string,
-        name: "Create a novel",
-        description: "Create a novel based on a prompt.",
-        status: "pending",
-        token: LOOP_REQUEST_TOKEN,
-        params: {
-            prompt: "你是一个作家，正在创作《重生之我在异界开挂》。",
-        },
-        result: undefined,
-        output: undefined,
-    }
-
-    const workflow: Workflow = {
-        id: crypto.randomUUID() as string,
-        name: "Create a novel",
-        description: "Create a novel based on a prompt.",
-        tasks: [task],
-        edges: []
-    }
-    // 一个任务 一个工作流 创世
-    const injector = createSchedulerInjector(task.id, workflow, application)
-
-
 }
 
 master().catch(console.error);

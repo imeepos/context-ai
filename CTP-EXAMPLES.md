@@ -279,34 +279,54 @@ export async function I18nContext() {
 
 ## 数据获取示例
 
-### 使用 Zod Schema 定义参数
+### 使用 TypeBox Schema 定义参数
 
 ```tsx
 // contexts/CreateOrderContext.tsx
 import { Context, Text, Tool, Group } from '@context-ai/core';
-import { z } from 'zod';
+import { Type, type Static } from '@sinclair/typebox';
 
 // 定义 Schema
-const createOrderSchema = z.object({
-  customerId: z.string().uuid({ message: "必须是有效的客户ID" }),
-  items: z.array(
-    z.object({
-      productId: z.string().min(1, "商品ID不能为空"),
-      name: z.string().describe("商品名称"),
-      quantity: z.number().int().min(1, "数量至少为1").max(100, "数量最多为100"),
-      price: z.number().positive("价格必须为正数").optional(),
-    })
-  ).min(1, "至少需要一件商品"),
-  shippingAddress: z.object({
-    street: z.string().min(1, "街道不能为空"),
-    city: z.string(),
-    zipCode: z.string().regex(/^\d{6}$/, "邮编必须是6位数字"),
-  }).optional().describe("配送地址"),
-  notes: z.string().max(500, "备注不能超过500字").optional(),
+const createOrderSchema = Type.Object({
+  customerId: Type.String({
+    format: 'uuid',
+    description: "必须是有效的客户ID"
+  }),
+  items: Type.Array(
+    Type.Object({
+      productId: Type.String({
+        minLength: 1,
+        description: "商品ID不能为空"
+      }),
+      name: Type.String({ description: "商品名称" }),
+      quantity: Type.Integer({
+        minimum: 1,
+        maximum: 100,
+        description: "数量至少为1，最多为100"
+      }),
+      price: Type.Optional(Type.Number({
+        minimum: 0,
+        description: "价格必须为正数"
+      })),
+    }),
+    { minItems: 1, description: "至少需要一件商品" }
+  ),
+  shippingAddress: Type.Optional(Type.Object({
+    street: Type.String({ minLength: 1, description: "街道不能为空" }),
+    city: Type.String(),
+    zipCode: Type.String({
+      pattern: '^\\d{6}$',
+      description: "邮编必须是6位数字"
+    }),
+  }, { description: "配送地址" })),
+  notes: Type.Optional(Type.String({
+    maxLength: 500,
+    description: "备注不能超过500字"
+  })),
 });
 
 // 推断类型
-type CreateOrderParams = z.infer<typeof createOrderSchema>;
+type CreateOrderParams = Static<typeof createOrderSchema>;
 
 export async function CreateOrderContext() {
   return (
@@ -317,9 +337,7 @@ export async function CreateOrderContext() {
         <Tool
           name="submit_order"
           description="提交订单"
-          risk="high"
-          confirm={true}
-          schema={createOrderSchema}  // 使用 Zod Schema
+          parameters={createOrderSchema}  // 使用 TypeBox Schema
           executor={async (params: CreateOrderParams) => {
             // params 已自动验证，类型安全
             const response = await fetch('/api/orders', {

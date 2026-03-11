@@ -22,7 +22,8 @@
     "@mariozechner/pi-ai": "^0.56.0",
     "cron-parser": "^4.9.0",
     "openai": "^6.26.0",
-    "rxjs": "^7.8.2"
+    "rxjs": "^7.8.2",
+    "typeorm": "^0.3.28"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

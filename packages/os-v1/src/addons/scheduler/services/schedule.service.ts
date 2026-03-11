@@ -2,6 +2,12 @@ import { createFeatureInjector, InjectionToken, Injector } from "@context-ai/cor
 import { ACTION_EXECUTER, SESSION_ID, SESSION_LOGGER, type Token } from "../../../tokens.js";
 import type { Static, TSchema } from "@mariozechner/pi-ai";
 import { SessionLogger } from "../../../core/session-logger.js";
+export interface WorkflowPatch {
+    op: "add_task" | "update_task" | "remove_task" | "add_edge" | "remove_edge" | "reorder";
+    targetId?: string;
+    payload: Record<string, unknown>;
+    reason: string;
+}
 export interface Task<TRequest extends TSchema = TSchema, TResponse extends TSchema = TSchema> {
     id: string;
     name: string;
@@ -14,8 +20,6 @@ export interface Task<TRequest extends TSchema = TSchema, TResponse extends TSch
     params: Static<TRequest>;
     // 结果
     result: Static<TResponse> | undefined;
-    // 给下一个任务传递的提示
-    nextPrompt: string | undefined;
 }
 export interface Edge {
     from: string;
@@ -45,13 +49,6 @@ export const NEXT_TASK = new InjectionToken<Task[]>('NEXT_TASK');
  */
 export const CURRENT_WORKFLOW = new InjectionToken<Workflow>('CURRENT_WORKFLOW');
 
-
-export interface NextPrompt {
-    nextPrompt: string
-}
-export function isNextPrompt(val: unknown): val is NextPrompt {
-    return typeof val === 'object' && val !== null && 'nextPrompt' in val
-}
 /**
  * 工作流执行器
  */
@@ -74,10 +71,6 @@ export class WorkflowRunner {
             const result = await actionExecuter.execute(task.token, task.params, childInjector);
             task.result = result;
             task.status = "completed";
-            // 生成output
-            if (isNextPrompt(result)) {
-                task.nextPrompt = result.nextPrompt;
-            }
             workflow.tasks = workflow.tasks.map(t => t.id === task.id ? task : t);
             // 根据当前任务，前一个任务，下一个任务组成的上下文，生成或更新成后续的任务，走一步看一步
         }

@@ -1,5 +1,8 @@
+import { ENTITIES } from "../../orm.js";
 import type { Application } from "../../tokens.js";
+import { Workflow } from "./entities/workflow.entity.js";
 import { WorkflowRunner } from "./services/schedule.service.js";
+import { WorkflowService } from "./services/workflow.service.js";
 
 export default {
     name: "scheduler",
@@ -10,5 +13,7 @@ export default {
     ],
     providers: [
         { provide: WorkflowRunner, useFactory: () => new WorkflowRunner() },
+        { provide: WorkflowService, useClass: WorkflowService },
+        { provide: ENTITIES, useValue: Workflow, multi: true }
     ],
 } as Application

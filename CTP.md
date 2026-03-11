@@ -73,7 +73,7 @@ export async function OrderListContext() {
           key={order.id}
           name={`view_order_${order.id}`}
           description={`查看订单 ${order.id}`}
-          params={z.object({})}
+          parameters={Type.Object({})}
           executor={async () => <OrderDetailContext id={order.id} />}
         />
       ))}
@@ -236,11 +236,12 @@ Re-render (新 Context)
 <Tool
   name="cancel_order"
   description="取消订单"
-  params={z.object({ reason: z.string() })}  // Zod Schema
-  confirm={true}                              // 危险操作确认
-  executor={async (params, context) => {
+  parameters={Type.Object({
+    reason: Type.String({ description: "取消原因" })
+  })}  // TypeBox Schema
+  executor={async (params) => {
     // 执行取消
-    await api.cancel(context.orderId, params.reason);
+    await api.cancel(orderId, params.reason);
 
     // 返回新 Context（自动导航）
     return <OrderListContext />;
@@ -317,7 +318,9 @@ export default {
 <Tool
   name="search_orders"
   description="搜索订单"
-  params={z.object({ keyword: z.string() })}
+  parameters={Type.Object({
+    keyword: Type.String({ description: "搜索关键词" })
+  })}
   executor={...}
 />
 

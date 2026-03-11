@@ -617,24 +617,18 @@ interface ToolProps {
   onError?: (error: Error, params: unknown) => ExecutorResult;
 
   /**
-   * 参数定义（声明式方式）
-   * 与 schema 二选一，schema 优先级更高
-   */
-  children?: React.ReactElement<ParamProps> | React.ReactElement<ParamProps>[];
-
-  /**
-   * 参数 Schema（Zod 方式）
-   * 更灵活的类型定义和验证
+   * 参数 Schema（TypeBox）
+   * 使用 TypeBox 定义参数结构和验证规则
    * @example
-   * schema: z.object({
-   *   customerId: z.string().uuid(),
-   *   items: z.array(z.object({
-   *     productId: z.string(),
-   *     quantity: z.number().min(1).max(100)
-   *   })).min(1)
+   * parameters: Type.Object({
+   *   customerId: Type.String({ format: 'uuid' }),
+   *   items: Type.Array(Type.Object({
+   *     productId: Type.String(),
+   *     quantity: Type.Integer({ minimum: 1, maximum: 100 })
+   *   }), { minItems: 1 })
    * })
    */
-  schema?: ZodSchema;
+  parameters?: TSchema;
 }
 
 type Executor<T = Record<string, unknown>> = (
@@ -654,103 +648,83 @@ type ExecutorResult =
 
 **示例：**
 
-**方式 1：声明式 Param（简单场景）**
+**TypeBox Schema 示例（推荐）**
 ```tsx
-<Tool
-  name="say_hello"
-  description="向用户问好"
-  executor={async (params) => {
-    console.log(`你好，${params.name}！`);
-    return { message: `问候已发送给 ${params.name}` };
-  }}
->
-  <Param name="name" type="string" required description="用户姓名" />
-</Tool>
-```
-
-**方式 2：Zod Schema（推荐，复杂场景）**
-```tsx
-import { z } from 'zod';
+import { Type, type Static } from '@sinclair/typebox';
 
 // 1. 定义 Schema
-const createOrderSchema = z.object({
-  customerId: z.string().uuid({ message: "必须是有效的 UUID" }),
-  items: z.array(
-    z.object({
-      productId: z.string().min(1, "商品ID不能为空"),
-      quantity: z.number().int().min(1, "数量至少为1").max(100, "数量最多为100"),
-      price: z.number().positive("价格必须为正数").optional(),
-    })
-  ).min(1, "至少需要一件商品"),
-  shippingAddress: z.object({
-    street: z.string(),
-    city: z.string(),
-    zipCode: z.string().regex(/^\d{6}$/, "邮编格式错误"),
-  }).optional(),
-  notes: z.string().max(500, "备注不能超过500字").optional(),
+const createOrderSchema = Type.Object({
+  customerId: Type.String({
+    format: 'uuid',
+    description: "必须是有效的 UUID"
+  }),
+  items: Type.Array(
+    Type.Object({
+      productId: Type.String({
+        minLength: 1,
+        description: "商品ID不能为空"
+      }),
+      quantity: Type.Integer({
+        minimum: 1,
+        maximum: 100,
+        description: "数量至少为1，最多为100"
+      }),
+      price: Type.Optional(Type.Number({
+        minimum: 0,
+        description: "价格必须为正数"
+      })),
+    }),
+    { minItems: 1, description: "至少需要一件商品" }
+  ),
+  shippingAddress: Type.Optional(Type.Object({
+    street: Type.String(),
+    city: Type.String(),
+    zipCode: Type.String({
+      pattern: '^\\d{6}$',
+      description: "邮编必须是6位数字"
+    }),
+  })),
+  notes: Type.Optional(Type.String({
+    maxLength: 500,
+    description: "备注不能超过500字"
+  })),
 });
 
 // 2. 推断类型
-type CreateOrderParams = z.infer<typeof createOrderSchema>;
+type CreateOrderParams = Static<typeof createOrderSchema>;
 
 // 3. 使用 Schema
 <Tool
   name="create_order"
   description="创建新订单"
-  risk="high"
-  confirm={true}
-  schema={createOrderSchema}  // 传入 Zod Schema
-  executor={async (params: CreateOrderParams) => {
+  parameters={createOrderSchema}  // 传入 TypeBox Schema
+  execute={async (params: CreateOrderParams) => {
     // params 已自动验证，类型安全
     const result = await fetch('/api/orders', {
       method: 'POST',
       body: JSON.stringify(params),
     }).then(r => r.json());
 
-    return <OrderDetail orderId={result.id} />;
+    return result;
   }}
-  onError={(error) => <ErrorMessage message={error.message} />}
 />
-```
-
-**方式 3：组合使用（混合场景）**
-```tsx
-// 简单参数用 Param，复杂参数用 schema
-<Tool
-  name="update_user"
-  description="更新用户信息"
-  schema={z.object({
-    profile: z.object({
-      nickname: z.string().min(2).max(20),
-      avatar: z.string().url().optional(),
-      bio: z.string().max(200).optional(),
-    }),
-  })}
-  executor={async (params) => {
-    // 执行更新
-  }}
->
-  {/* 简单参数仍可声明式定义 */}
-  <Param name="userId" type="string" required description="用户ID" />
-</Tool>
 ```
 
 ---
 
 ### Schema 转换
 
-CTP-Lite 会自动将 Zod Schema 转换为 LLM 可理解的 JSON Schema：
+CTP 会自动将 TypeBox Schema 转换为 LLM 可理解的 JSON Schema：
 
 ```typescript
-import { z } from 'zod';
-import { toJSONSchema } from '@context-ai/core';
+import { Type, type Static } from '@sinclair/typebox';
 
-const schema = z.object({
-  name: z.string().describe("用户姓名"),
-  age: z.number().optional(),
+const schema = Type.Object({
+  name: Type.String({ description: "用户姓名" }),
+  age: Type.Optional(Type.Number()),
 });
 
-// 自动转换结果：
+// TypeBox 直接生成 JSON Schema：
 // {
 //   type: "object",
 //   properties: {
@@ -821,81 +795,82 @@ interface ParamProps {
 
 ---
 
-### Zod Schema 支持
+### TypeBox Schema 支持
 
-#### `ZodSchema` 类型
+#### `TSchema` 类型
 
-CTP-Lite 原生支持 [Zod](https://github.com/colinhacks/zod) 进行参数定义和验证。
+CTP 原生使用 [TypeBox](https://github.com/sinclairzx81/typebox) 进行参数定义和验证。
 
 ```typescript
-import { z } from 'zod';
-import type { ZodTypeAny, ZodObject, ZodArray, ZodString, ZodNumber, ZodBoolean, ZodEnum, ZodOptional, ZodDefault } from 'zod';
+import { Type, type Static, type TSchema } from '@sinclair/typebox';
 
-type ZodSchema = ZodTypeAny;
+// TypeBox Schema 类型
+type TSchema = any; // TypeBox 导出的基础 Schema 类型
 
-// 工具函数：将 Zod Schema 转换为 JSON Schema
-function toJSONSchema(schema: ZodSchema): JSONSchema;
-
-// 工具函数：验证参数
-function validateParams<T>(schema: z.ZodSchema<T>, params: unknown): T;
+// 从 Schema 推断 TypeScript 类型
+type InferType<T extends TSchema> = Static<T>;
 ```
 
-#### 支持的 Zod 类型
+#### 常用 TypeBox 类型
 
-| Zod 类型 | JSON Schema 输出 | 说明 |
+| TypeBox 类型 | JSON Schema 输出 | 说明 |
 |----------|-----------------|------|
-| `z.string()` | `{ type: "string" }` | 字符串 |
-| `z.number()` | `{ type: "number" }` | 数字 |
-| `z.boolean()` | `{ type: "boolean" }` | 布尔值 |
-| `z.array(T)` | `{ type: "array", items: ... }` | 数组 |
-| `z.object({})` | `{ type: "object", properties: {} }` | 对象 |
-| `z.enum([...])` | `{ enum: [...] }` | 枚举 |
-| `z.optional()` | 从 required 中移除 | 可选 |
-| `z.default()` | 添加 default | 默认值 |
-| `z.describe()` | 添加 description | 描述 |
-| `z.min()` / `z.max()` | 添加 minLength / maxLength | 长度限制 |
-| `z.email()` | 添加 pattern | 邮箱格式 |
-| `z.url()` | 添加 pattern | URL 格式 |
-| `z.uuid()` | 添加 pattern | UUID 格式 |
-| `z.regex()` | 添加 pattern | 正则匹配 |
+| `Type.String()` | `{ type: "string" }` | 字符串 |
+| `Type.Number()` | `{ type: "number" }` | 数字 |
+| `Type.Integer()` | `{ type: "integer" }` | 整数 |
+| `Type.Boolean()` | `{ type: "boolean" }` | 布尔值 |
+| `Type.Array(T)` | `{ type: "array", items: ... }` | 数组 |
+| `Type.Object({})` | `{ type: "object", properties: {} }` | 对象 |
+| `Type.Enum([...])` | `{ enum: [...] }` | 枚举 |
+| `Type.Optional(T)` | 从 required 中移除 | 可选 |
+| `Type.String({ format: 'email' })` | 添加 format | 邮箱格式 |
+| `Type.String({ format: 'uri' })` | 添加 format | URL 格式 |
+| `Type.String({ format: 'uuid' })` | 添加 format | UUID 格式 |
+| `Type.String({ pattern: '...' })` | 添加 pattern | 正则匹配 |
 
 #### 复杂 Schema 示例
 
 ```typescript
-import { z } from 'zod';
+import { Type, type Static } from '@sinclair/typebox';
 
 // 定义嵌套结构
-const addressSchema = z.object({
-  street: z.string().min(1, "街道不能为空"),
-  city: z.string(),
-  country: z.string().default("中国"),
-  zipCode: z.string().regex(/^\d{6}$/, "邮编必须是6位数字"),
+const addressSchema = Type.Object({
+  street: Type.String({ minLength: 1, description: "街道不能为空" }),
+  city: Type.String(),
+  country: Type.String({ default: "中国" }),
+  zipCode: Type.String({
+    pattern: '^\\d{6}$',
+    description: "邮编必须是6位数字"
+  }),
 });
 
-const orderItemSchema = z.object({
-  productId: z.string().uuid(),
-  name: z.string().describe("商品名称"),
-  quantity: z.number().int().positive(),
-  price: z.number().nonnegative(),
-  options: z.record(z.string()).optional(), // 额外选项
+const orderItemSchema = Type.Object({
+  productId: Type.String({ format: 'uuid' }),
+  name: Type.String({ description: "商品名称" }),
+  quantity: Type.Integer({ minimum: 1 }),
+  price: Type.Number({ minimum: 0 }),
+  options: Type.Optional(Type.Record(Type.String(), Type.String())), // 额外选项
 });
 
-const createOrderSchema = z.object({
-  customerId: z.string().uuid(),
-  items: z.array(orderItemSchema).min(1),
+const createOrderSchema = Type.Object({
+  customerId: Type.String({ format: 'uuid' }),
+  items: Type.Array(orderItemSchema, { minItems: 1 }),
   shippingAddress: addressSchema,
-  billingAddress: addressSchema.optional(),
-  couponCode: z.string().length(8).optional(),
-  notes: z.string().max(500).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  billingAddress: Type.Optional(addressSchema),
+  couponCode: Type.Optional(Type.String({ minLength: 8, maxLength: 8 })),
+  notes: Type.Optional(Type.String({ maxLength: 500 })),
+  metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
 });
+
+// 类型推断
+type CreateOrderParams = Static<typeof createOrderSchema>;
 
 // 使用
 <Tool
   name="create_order"
-  schema={createOrderSchema}
-  executor={async (params) => {
-    // params 类型：z.infer<typeof createOrderSchema>
+  parameters={createOrderSchema}
+  execute={async (params: CreateOrderParams) => {
+    // params 类型：Static<typeof createOrderSchema>
     // 已自动验证，无需手动检查
     return createOrder(params);
   }}

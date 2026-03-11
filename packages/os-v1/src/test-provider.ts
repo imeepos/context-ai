@@ -21,12 +21,10 @@ import {
     SHELL_SESSION_DIR,
     EVENT_BUS,
     SCHEDULER_OPTIONS,
-    SCHEDULER_SERVICE,
     USER_PERMISSIONS,
     SESSION_LOGGER
 } from "./tokens.js";
 import { ActionExecuterImpl } from "./action-executer.js";
-import { SchedulerService } from "./core/scheduler.js";
 import { EventBusService } from "./core/event-bus.js";
 import { MemorySchedulerStateAdapter } from "./core/scheduler-persistence.js";
 import { MemorySessionLogger } from "./core/session-logger.js";
@@ -48,14 +46,6 @@ import { fileGrepAction } from "./actions/file-grep.action.js";
 import { fileEditAction } from "./actions/file-edit.action.js";
 import { fileSnapshotAction } from "./actions/file-snapshot.action.js";
 import { fileRollbackAction } from "./actions/file-rollback.action.js";
-import { schedulerCancelAction } from "./actions/scheduler-cancel.action.js";
-import { schedulerListAction } from "./actions/scheduler-list.action.js";
-import { schedulerFailuresClearAction } from "./actions/scheduler-failures-clear.action.js";
-import { schedulerFailuresReplayAction } from "./actions/scheduler-failures-replay.action.js";
-import { schedulerStateExportAction } from "./actions/scheduler-state-export.action.js";
-import { schedulerStateImportAction } from "./actions/scheduler-state-import.action.js";
-import { schedulerStatePersistAction } from "./actions/scheduler-state-persist.action.js";
-import { schedulerStateRecoverAction } from "./actions/scheduler-state-recover.action.js";
 import { loopRequestAction } from "./actions/loop.action.js";
 import { bowongModelActions } from "./actions/bowong/index.js";
 
@@ -80,14 +70,6 @@ function getActionProviders(): Provider[] {
         fileEditAction,
         fileSnapshotAction,
         fileRollbackAction,
-        schedulerCancelAction,
-        schedulerListAction,
-        schedulerFailuresClearAction,
-        schedulerFailuresReplayAction,
-        schedulerStateExportAction,
-        schedulerStateImportAction,
-        schedulerStatePersistAction,
-        schedulerStateRecoverAction,
         loopRequestAction,
         ...bowongModelActions,
     ];
@@ -157,21 +139,11 @@ export const testProviders: Provider[] = [
         } as SchedulerServiceOptions
     },
 
-    // SchedulerService
-    {
-        provide: SchedulerService,
-        useClass: SchedulerService
-    },
-    {
-        provide: SCHEDULER_SERVICE,
-        useClass: SchedulerService
-    },
-
     // ActionExecuter
     {
         provide: ACTION_EXECUTER,
-        useFactory: (actions) => new ActionExecuterImpl(actions),
-        deps: [ACTIONS]
+        useFactory: (actions, eventBus) => new ActionExecuterImpl(actions, eventBus),
+        deps: [ACTIONS, EVENT_BUS]
     },
 
     // 测试用默认权限（包含所有权限）
