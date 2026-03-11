@@ -5,9 +5,9 @@ import { OsSnakeNamingStrategy } from './orm-naming.strategy.js'
 describe('TypeormFactory', () => {
     it('should use OsSnakeNamingStrategy in datasource options', () => {
         const factory = new TypeormFactory('/tmp/context-ai', [])
-        const options = factory.createOptions()
+        const dataSource = factory.create()
 
-        expect(options.namingStrategy).toBeInstanceOf(OsSnakeNamingStrategy)
+        expect(dataSource.options.namingStrategy).toBeInstanceOf(OsSnakeNamingStrategy)
     })
 })
 
@@ -16,12 +16,12 @@ describe('OsSnakeNamingStrategy', () => {
 
     it('should convert table and column names to snake_case', () => {
         expect(strategy.tableName('UserProfile', undefined)).toBe('user_profile')
-        expect(strategy.columnName('createdAt', undefined, [])).toBe('created_at')
+        expect(strategy.columnName('createdAt', '', [])).toBe('created_at')
     })
 
     it('should convert join names to snake_case', () => {
         expect(strategy.joinColumnName('ownerProfile', 'userId')).toBe('owner_profile_user_id')
-        expect(strategy.joinTableName('UserProfile', 'RoleGroup', 'roles.list', 'users.list')).toBe('user_profile_roles_list_role_group')
+        expect(strategy.joinTableName('UserProfile', 'RoleGroup', 'roles.list')).toBe('user_profile_roles_list_role_group')
     })
 
     it('should preserve explicit custom names like default strategy behavior', () => {

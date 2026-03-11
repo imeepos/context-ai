@@ -1,4 +1,4 @@
-﻿import "reflect-metadata";
+import "reflect-metadata";
 
 import { ShellSessionStore } from "./core/shell-session.js";
 import { bootstrap } from "./bootstrap.js";
@@ -8,7 +8,8 @@ import { LOOP_REQUEST_TOKEN } from "./actions/loop.action.js";
 
 export async function master() {
     const logPattern = getCliOption("log");
-    const sessionId = getCliOption("sid") ?? "master";
+    const sessionId = getCliOption("sid") ?? "cli";
+    const prompt = getCliOption("prompt") ?? "";
 
     const application = await bootstrap(sessionId, logPattern ?? "*");
     const shellSessionStore = application.get(ShellSessionStore);
@@ -23,8 +24,8 @@ export async function master() {
     }
     const actionExecuter = application.get(ACTION_EXECUTER)
     const result = await actionExecuter.execute(LOOP_REQUEST_TOKEN, {
-        path: `workflow://list`,
-        prompt: `我想写一本 凡人修仙传`
+        path: `coding://bugfix`,
+        prompt: prompt
     }, application)
     console.log({ result })
 }

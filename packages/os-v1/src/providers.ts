@@ -1,4 +1,5 @@
-import type { Provider } from "@context-ai/core";
+import type { Provider, Initializer } from "@context-ai/core";
+import { APP_INITIALIZER } from "@context-ai/core";
 import {
     ACTION_EXECUTER,
     ACTIONS,
@@ -55,12 +56,14 @@ import { appUpgradeAction } from "./actions/app-upgrade.action.js";
 import { bowongModelActions } from "./actions/bowong/index.js";
 import { TypeormFactory } from "./orm.js";
 import { DataSource } from "typeorm";
+import { AutoRecoveryService } from "./core/auto-recovery.service.js";
+import { GlobalErrorHandler } from "./core/global-error-handler.js";
 
 export const platformProviders: Provider[] = [
     // 路径常量注册
     { provide: ROOT_DIR, useValue: join(homedir(), '.context-ai') },
-    { provide: SYSTEM_LOG_FILTER, useValue: process.env.OS_LOG_FILTER ?? "*" },
-    { provide: SYSTEM_LOGGER, useClass: SystemLogger },
+    { provide: SYSTEM_LOG_FILTER, useValue: "*" },
+    { provide: SYSTEM_LOGGER, useFactory: () => new SystemLogger("*") },
     { provide: SHELL_SESSION_DIR, useFactory: (root: string) => join(root, 'shell', 'sessions'), deps: [ROOT_DIR] },
     { provide: SHELL_PID_DIR, useFactory: (root: string) => join(root, 'shell', 'pids'), deps: [ROOT_DIR] },
     { provide: CURRENT_DIR, useValue: process.cwd() },
@@ -266,5 +269,66 @@ export const applicationProviders: Provider[] = [
         { provide: action.type, useValue: action },
     ])),
     { provide: TypeormFactory, useClass: TypeormFactory },
-    { provide: DataSource, useFactory: (factory: TypeormFactory) => factory.create(), deps: [TypeormFactory] }
+    { provide: DataSource, useFactory: (factory: TypeormFactory) => factory.create(), deps: [TypeormFactory] },
+    // 初始化 DataSource
+    {
+        provide: APP_INITIALIZER,
+        useFactory: (dataSource: DataSource): Initializer => ({
+            async init() {
+                if (!dataSource.isInitialized) {
+                    await dataSource.initialize();
+                }
+            }
+        }),
+        deps: [DataSource],
+        multi: true
+    },
+    // 自动错误恢复服务
+    { provide: AutoRecoveryService, useClass: AutoRecoveryService },
+    // 启动自动恢复服务
+    {
+        provide: APP_INITIALIZER,
+        useFactory: (autoRecovery: AutoRecoveryService): Initializer => ({
+            async init() {
+                // 从环境变量读取配置
+                const enabled = process.env.AUTO_RECOVERY_ENABLED !== 'false';
+                const maxRetries = parseInt(process.env.AUTO_RECOVERY_MAX_RETRIES ?? '3', 10);
+                const codexModel = process.env.AUTO_RECOVERY_CODEX_MODEL ?? 'claude-sonnet-4.5';
+
+                autoRecovery.start({
+                    enabled,
+                    maxRetries,
+                    codexModel,
+                    excludedActions: ['codex.execute', 'claude.execute'], // 避免递归
+                    includedActions: [] // 空表示所有 action
+                });
+            }
+        }),
+        deps: [AutoRecoveryService],
+        multi: true
+    },
+    // 全局错误处理器
+    { provide: GlobalErrorHandler, useClass: GlobalErrorHandler },
+    // 安装全局错误处理器
+    {
+        provide: APP_INITIALIZER,
+        useFactory: (errorHandler: GlobalErrorHandler): Initializer => ({
+            async init() {
+                // 从环境变量读取配置
+                const enabled = process.env.GLOBAL_ERROR_HANDLER_ENABLED !== 'false';
+                const exitOnError = process.env.GLOBAL_ERROR_HANDLER_EXIT_ON_ERROR === 'true';
+                const exitDelayMs = parseInt(process.env.GLOBAL_ERROR_HANDLER_EXIT_DELAY_MS ?? '30000', 10);
+
+                errorHandler.install({
+                    enabled,
+                    captureUnhandledRejection: true,
+                    captureUncaughtException: true,
+                    exitOnError,
+                    exitDelayMs
+                });
+            }
+        }),
+        deps: [GlobalErrorHandler],
+        multi: true
+    }
 ]

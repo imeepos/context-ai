@@ -10,6 +10,8 @@ export function createPageFactory<TParameters extends TSchema = TSchema>(page: P
         multi: true,
         useValue: {
             path: page.path,
+            name: page.name,
+            description: page.description,
             create: async (props: Static<TParameters>, injector: Injector): Promise<RenderedContext> => {
                 const element = await page.factory(props, injector);
 

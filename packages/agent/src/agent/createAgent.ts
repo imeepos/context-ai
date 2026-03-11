@@ -14,7 +14,7 @@ export function createAgent(systemPrompt: string, tools: AgentTool[]): Agent {
 
   return new Agent({
     initialState: {
-      systemPrompt,
+      systemPrompt: systemPrompt,
       model: createCustomModel(),
       tools,
       // Default to off to avoid cross-turn Responses item-id errors under store=false.

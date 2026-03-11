@@ -1,42 +1,35 @@
 import { Inject, Injectable } from "@context-ai/core";
 import { DataSource } from "typeorm";
 import { Workflow as WorkflowEntity } from "../entities/workflow.entity.js";
+import type {
+    CreateWorkflowInput,
+    UpdateWorkflowInput,
+    WorkflowPatch,
+    Task,
+    Edge,
+    WorkflowStats,
+    WorkflowStatus
+} from "../types.js";
 
-export interface WorkflowTaskNode {
-    id: string;
-}
+// 重新导出 WorkflowPatch，以便测试文件可以导入
+export type { WorkflowPatch };
 
-export interface WorkflowEdgeNode {
-    from: string;
-    to: string;
-}
-
-export interface CreateWorkflowInput {
-    id?: string;
-    name: string;
-    description?: string;
-    tasks?: WorkflowTaskNode[];
-    edges?: WorkflowEdgeNode[];
-}
-
-export interface UpdateWorkflowInput {
-    name?: string;
-    description?: string;
-    tasks?: WorkflowTaskNode[];
-    edges?: WorkflowEdgeNode[];
-}
-
-export interface WorkflowPatch {
-    op: "add_task" | "update_task" | "remove_task" | "add_edge" | "remove_edge" | "reorder";
-    targetId?: string;
-    payload: Record<string, unknown>;
-    reason: string;
-}
-
+/**
+ * 工作流服务
+ *
+ * 负责工作流的 CRUD 操作和 Patch 机制
+ */
 @Injectable()
 export class WorkflowService {
     constructor(@Inject(DataSource) private readonly dataSource: DataSource) {}
 
+    // ============================================================================
+    // CRUD 操作
+    // ============================================================================
+
+    /**
+     * 创建工作流
+     */
     async createWorkflow(input: CreateWorkflowInput): Promise<WorkflowEntity> {
         const repo = this.getRepository();
         const created = repo.create({
@@ -45,18 +38,41 @@ export class WorkflowService {
             description: input.description ?? "",
             tasks: input.tasks ?? [],
             edges: input.edges ?? [],
+            windowConfig: input.windowConfig ?? { lookBehind: 1, lookAhead: 3 },
+            status: 'pending',
+            compressedHistory: [],
+            replanHistory: [],
+            executionStats: {
+                totalTasks: (input.tasks ?? []).length,
+                completedTasks: 0,
+                failedTasks: 0,
+                retriedTasks: 0
+            }
         });
         return repo.save(created);
     }
 
-    async listWorkflows(): Promise<WorkflowEntity[]> {
-        return this.getRepository().find();
+    /**
+     * 列出所有工作流
+     */
+    async listWorkflows(status?: WorkflowStatus): Promise<WorkflowEntity[]> {
+        const repo = this.getRepository();
+        if (status) {
+            return repo.find({ where: { status } });
+        }
+        return repo.find();
     }
 
+    /**
+     * 获取工作流（可能不存在）
+     */
     async getWorkflow(id: string): Promise<WorkflowEntity | null> {
         return this.getRepository().findOne({ where: { id } });
     }
 
+    /**
+     * 获取工作流（不存在则抛出异常）
+     */
     async getWorkflowOrThrow(id: string): Promise<WorkflowEntity> {
         const workflow = await this.getWorkflow(id);
         if (!workflow) {
@@ -65,6 +81,9 @@ export class WorkflowService {
         return workflow;
     }
 
+    /**
+     * 更新工作流
+     */
     async updateWorkflow(id: string, input: UpdateWorkflowInput): Promise<WorkflowEntity> {
         const repo = this.getRepository();
         const existing = await this.getWorkflowOrThrow(id);
@@ -75,6 +94,9 @@ export class WorkflowService {
         return repo.save(merged);
     }
 
+    /**
+     * 删除工作流
+     */
     async deleteWorkflow(id: string): Promise<boolean> {
         const repo = this.getRepository();
         const workflow = await this.getWorkflow(id);
@@ -85,6 +107,13 @@ export class WorkflowService {
         return true;
     }
 
+    // ============================================================================
+    // Patch 操作
+    // ============================================================================
+
+    /**
+     * 应用单个 Patch
+     */
     async applyPatch(id: string, patch: WorkflowPatch): Promise<WorkflowEntity> {
         const workflow = await this.getWorkflowOrThrow(id);
         const tasks = this.getTasks(workflow);
@@ -116,9 +145,18 @@ export class WorkflowService {
 
         workflow.tasks = tasks;
         workflow.edges = edges;
+
+        // 更新统计信息
+        if (workflow.executionStats) {
+            workflow.executionStats.totalTasks = tasks.length;
+        }
+
         return this.getRepository().save(workflow);
     }
 
+    /**
+     * 批量应用 Patch
+     */
     async applyPatches(id: string, patches: WorkflowPatch[]): Promise<WorkflowEntity> {
         let workflow = await this.getWorkflowOrThrow(id);
         for (const patch of patches) {
@@ -127,19 +165,84 @@ export class WorkflowService {
         return workflow;
     }
 
+    // ============================================================================
+    // 查询和统计
+    // ============================================================================
+
+    /**
+     * 获取工作流统计信息
+     */
+    async getWorkflowStats(id: string): Promise<WorkflowStats> {
+        const workflow = await this.getWorkflowOrThrow(id);
+        const tasks = this.getTasks(workflow);
+        const completedTasks = tasks.filter(t => t.status === 'completed').length;
+        const failedTasks = tasks.filter(t => t.status === 'failed').length;
+        const totalTasks = tasks.length;
+        const progress = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+
+        return {
+            id: workflow.id!,
+            name: workflow.name!,
+            status: workflow.status!,
+            totalTasks,
+            completedTasks,
+            failedTasks,
+            progress,
+            currentFocus: workflow.currentFocus,
+            createdAt: workflow.createAt,
+            lastExecutedAt: workflow.lastExecutedAt
+        };
+    }
+
+    /**
+     * 根据任务 ID 查找任务
+     */
+    findTaskById(workflow: WorkflowEntity, taskId: string): Task | undefined {
+        const tasks = this.getTasks(workflow);
+        return tasks.find(t => t.id === taskId);
+    }
+
+    /**
+     * 查找任务的后继任务（通过边）
+     */
+    findNextTasks(workflow: WorkflowEntity, taskId: string): Task[] {
+        const tasks = this.getTasks(workflow);
+        const edges = this.getEdges(workflow);
+        const nextEdges = edges.filter(e => e.from === taskId);
+        return nextEdges
+            .map(edge => tasks.find(t => t.id === edge.to))
+            .filter((t): t is Task => t !== undefined);
+    }
+
+    /**
+     * 查找任务的前驱任务（通过边）
+     */
+    findPrevTasks(workflow: WorkflowEntity, taskId: string): Task[] {
+        const tasks = this.getTasks(workflow);
+        const edges = this.getEdges(workflow);
+        const prevEdges = edges.filter(e => e.to === taskId);
+        return prevEdges
+            .map(edge => tasks.find(t => t.id === edge.from))
+            .filter((t): t is Task => t !== undefined);
+    }
+
+    // ============================================================================
+    // Private Helper Methods
+    // ============================================================================
+
     private getRepository() {
         return this.dataSource.getRepository(WorkflowEntity);
     }
 
-    private getTasks(workflow: WorkflowEntity): WorkflowTaskNode[] {
-        return Array.isArray(workflow.tasks) ? [...(workflow.tasks as WorkflowTaskNode[])] : [];
+    private getTasks(workflow: WorkflowEntity): Task[] {
+        return Array.isArray(workflow.tasks) ? [...(workflow.tasks as Task[])] : [];
     }
 
-    private getEdges(workflow: WorkflowEntity): WorkflowEdgeNode[] {
-        return Array.isArray(workflow.edges) ? [...(workflow.edges as WorkflowEdgeNode[])] : [];
+    private getEdges(workflow: WorkflowEntity): Edge[] {
+        return Array.isArray(workflow.edges) ? [...(workflow.edges as Edge[])] : [];
     }
 
-    private applyAddTask(tasks: WorkflowTaskNode[], payload: Record<string, unknown>): void {
+    private applyAddTask(tasks: Task[], payload: Record<string, unknown>): void {
         const id = payload.id;
         if (typeof id !== "string" || !id) {
             throw new Error("add_task payload.id is required");
@@ -147,12 +250,12 @@ export class WorkflowService {
         if (tasks.some((item) => item.id === id)) {
             throw new Error(`Task already exists: ${id}`);
         }
-        const task = { ...payload, id } as WorkflowTaskNode;
+        const task = { ...payload, id } as Task;
         tasks.push(task);
     }
 
     private applyUpdateTask(
-        tasks: WorkflowTaskNode[],
+        tasks: Task[],
         targetId: string | undefined,
         payload: Record<string, unknown>,
     ): void {
@@ -168,12 +271,12 @@ export class WorkflowService {
             throw new Error(`Task not found: ${targetId}`);
         }
         const merged = { ...current, ...payload, id: current.id };
-        tasks[index] = merged as WorkflowTaskNode;
+        tasks[index] = merged as Task;
     }
 
     private applyRemoveTask(
-        tasks: WorkflowTaskNode[],
-        edges: WorkflowEdgeNode[],
+        tasks: Task[],
+        edges: Edge[],
         targetId: string | undefined,
     ): void {
         if (!targetId) {
@@ -189,8 +292,8 @@ export class WorkflowService {
     }
 
     private applyAddEdge(
-        tasks: WorkflowTaskNode[],
-        edges: WorkflowEdgeNode[],
+        tasks: Task[],
+        edges: Edge[],
         payload: Record<string, unknown>,
     ): void {
         const from = payload.from;
@@ -210,7 +313,7 @@ export class WorkflowService {
         edges.push({ from, to });
     }
 
-    private applyRemoveEdge(edges: WorkflowEdgeNode[], payload: Record<string, unknown>): void {
+    private applyRemoveEdge(edges: Edge[], payload: Record<string, unknown>): void {
         const from = payload.from;
         const to = payload.to;
         if (typeof from !== "string" || typeof to !== "string") {
@@ -220,7 +323,7 @@ export class WorkflowService {
         edges.splice(0, edges.length, ...remained);
     }
 
-    private applyReorder(tasks: WorkflowTaskNode[], payload: Record<string, unknown>): WorkflowTaskNode[] {
+    private applyReorder(tasks: Task[], payload: Record<string, unknown>): Task[] {
         const taskIds = payload.taskIds;
         if (!Array.isArray(taskIds)) {
             throw new Error("reorder payload.taskIds is required");
@@ -230,7 +333,7 @@ export class WorkflowService {
             throw new Error("reorder payload.taskIds must be string[]");
         }
         const taskMap = new Map(tasks.map((task) => [task.id, task]));
-        const sorted: WorkflowTaskNode[] = [];
+        const sorted: Task[] = [];
 
         for (const taskId of order) {
             const task = taskMap.get(taskId);

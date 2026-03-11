@@ -1,5 +1,5 @@
 import { createApplicationInjector } from "@context-ai/core"
-import { APPLICATION_LOADER, APPLICATIONS, SHELL_SESSION_DIR, SHELL_SESSION_FILE, USER_PERMISSIONS, SHELL_PID_DIR, LOG_DIR, ROOT_DIR, SYSTEM_LOG_FILTER, SYSTEM_LOGGER, os } from "./index.js"
+import { APPLICATION_LOADER, APPLICATIONS, SHELL_SESSION_DIR, SHELL_SESSION_FILE, USER_PERMISSIONS, SHELL_PID_DIR, LOG_DIR, ROOT_DIR, SYSTEM_LOG_FILTER, SYSTEM_LOGGER, os, SESSION_ID, SESSION_LOGGER, SessionLogger } from "./index.js"
 import { join } from "path";
 import { existsSync, mkdirSync, writeFileSync } from "fs";
 import { ShellSessionStore } from "./core/shell-session.js";
@@ -33,14 +33,16 @@ export async function bootstrap(shellSessionId: string = 'master', logFilter: st
             return app.providers
         }).flat();
         const pages = allApplications.map(app => app.pages).flat()
-
+        console.log(`[logFilter] ${logFilter}`)
         const application = createApplicationInjector([
             ...platformProviders,
             ...applicationProviders,
             { provide: LOG_DIR, useFactory: (root: string) => join(root, shellSessionId, 'logs'), deps: [ROOT_DIR] },
             { provide: SYSTEM_LOG_FILTER, useValue: logFilter },
-            { provide: SYSTEM_LOGGER, useClass: SystemLogger },
+            { provide: SYSTEM_LOGGER, useFactory: () => new SystemLogger(logFilter) },
             { provide: APPLICATIONS, useValue: allApplications },
+            { provide: SESSION_ID, useValue: shellSessionId },
+            { provide: SESSION_LOGGER, useClass: SessionLogger },
             {
                 provide: SHELL_SESSION_FILE,
                 useFactory: (root: string) => {

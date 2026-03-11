@@ -122,11 +122,15 @@ export const APPLICATION_LOADER = new InjectionToken<ApplicationLoader[]>(`APPLI
  * - Static<TParameters> 是 Schema 推断的 TypeScript 类型
  * - 这样确保了从 Schema 到 TypeScript 的类型安全
  */
-export interface PageFactory {
+export interface PageFactory<TParameters extends TSchema = TSchema> {
     path: string;
+    name: string;
+    description: string;
+    props: TParameters;
     create<TParameters extends TSchema = TSchema>(params: Static<TParameters>, injector: Injector): Promise<RenderedContext>;
 }
-
+export const CURRENT_PAGE = new InjectionToken<PageFactory>(`CURRENT_PAGE`);
+export const CURRENT_PAGE_PARAMS = new InjectionToken<Static<TSchema>>(`CURRENT_PAGE_PARAMS`);
 export const PAGES = new InjectionToken<PageFactory[]>(`PAGES`)
 
 // ============================================================================

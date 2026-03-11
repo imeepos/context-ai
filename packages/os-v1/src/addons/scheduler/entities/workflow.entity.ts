@@ -68,13 +68,13 @@ export class Workflow {
      * 任务列表
      * 存储完整的任务数据（包括 token, params, result, status 等）
      */
-    @Column({ type: 'jsonb', nullable: true, default: [] })
+    @Column({ type: 'simple-json', nullable: true })
     tasks?: any[];
 
     /**
      * 任务依赖关系（DAG 边）
      */
-    @Column({ type: 'jsonb', nullable: true, default: [] })
+    @Column({ type: 'simple-json', nullable: true })
     edges?: any[];
 
     // ============================================================================
@@ -97,9 +97,8 @@ export class Workflow {
      * - 总窗口大小 = lookBehind + 1（当前） + lookAhead
      */
     @Column({
-        type: 'jsonb',
-        nullable: false,
-        default: { lookBehind: 1, lookAhead: 3 }
+        type: 'simple-json',
+        nullable: false
     })
     windowConfig?: WindowConfig;
 
@@ -110,7 +109,7 @@ export class Workflow {
      * - 不包含完整的 params 和其他详细信息
      * - 用于在上下文窗口中提供历史参考，而不占用过多空间
      */
-    @Column({ type: 'jsonb', nullable: false, default: [] })
+    @Column({ type: 'simple-json', nullable: false })
     compressedHistory?: TaskSummary[];
 
     /**
@@ -135,21 +134,15 @@ export class Workflow {
      * - 用于审计和调试
      * - 包含：timestamp, triggerReason, taskId, patchesApplied, context
      */
-    @Column({ type: 'jsonb', nullable: false, default: [] })
+    @Column({ type: 'simple-json', nullable: false })
     replanHistory?: ReplanEvent[];
 
     /**
      * 执行统计信息（可选，用于监控）
      */
     @Column({
-        type: 'jsonb',
-        nullable: true,
-        default: {
-            totalTasks: 0,
-            completedTasks: 0,
-            failedTasks: 0,
-            retriedTasks: 0
-        }
+        type: 'simple-json',
+        nullable: true
     })
     executionStats?: {
         /** 总任务数 */
@@ -175,18 +168,18 @@ export class Workflow {
     /**
      * 最后一次执行时间（任务执行时更新）
      */
-    @Column({ type: 'timestamp', nullable: true })
+    @Column({ type: 'datetime', nullable: true })
     lastExecutedAt?: Date;
 
     /**
      * 工作流开始时间（第一次执行时设置）
      */
-    @Column({ type: 'timestamp', nullable: true })
+    @Column({ type: 'datetime', nullable: true })
     startedAt?: Date;
 
     /**
      * 工作流完成时间（status 变为 completed 或 failed 时设置）
      */
-    @Column({ type: 'timestamp', nullable: true })
+    @Column({ type: 'datetime', nullable: true })
     completedAt?: Date;
 }

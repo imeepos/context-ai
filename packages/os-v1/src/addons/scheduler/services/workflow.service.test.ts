@@ -7,6 +7,7 @@ import { WorkflowService, type WorkflowPatch } from "./workflow.service.js";
 interface TaskNode {
     id: string;
     name: string;
+    description: string;
     status: "pending" | "running" | "completed" | "cancelled" | "failed";
     token: string;
     params: Record<string, unknown>;
@@ -139,8 +140,8 @@ describe("WorkflowService", () => {
     it("应该支持 add_edge / remove_edge", async () => {
         const { service } = createService();
         const tasks: TaskNode[] = [
-            { id: "t1", name: "a", status: "pending", token: "x", params: {} },
-            { id: "t2", name: "b", status: "pending", token: "x", params: {} },
+            { id: "t1", name: "a", description: "Task a", status: "pending", token: "x", params: {} },
+            { id: "t2", name: "b", description: "Task b", status: "pending", token: "x", params: {} },
         ];
         const created = await service.createWorkflow({
             name: "wf",
@@ -170,9 +171,9 @@ describe("WorkflowService", () => {
     it("应该支持 reorder", async () => {
         const { service } = createService();
         const tasks: TaskNode[] = [
-            { id: "t1", name: "a", status: "pending", token: "x", params: {} },
-            { id: "t2", name: "b", status: "pending", token: "x", params: {} },
-            { id: "t3", name: "c", status: "pending", token: "x", params: {} },
+            { id: "t1", name: "a", description: "Task a", status: "pending", token: "x", params: {} },
+            { id: "t2", name: "b", description: "Task b", status: "pending", token: "x", params: {} },
+            { id: "t3", name: "c", description: "Task c", status: "pending", token: "x", params: {} },
         ];
         const created = await service.createWorkflow({
             name: "wf",

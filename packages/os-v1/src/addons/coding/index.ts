@@ -1,6 +1,10 @@
 import type { Application } from "../../tokens.js";
 import { ExecuteFactory, ExecutePropsSchema } from "./execute.js";
 import { HistoryFactory, HistoryPropsSchema } from "./history.js";
+import { BugfixFactory, BugfixPropsSchema } from "./bugfix.js";
+import { BugReportService } from "./services/bug-report.service.js";
+import { BugReport } from "./entities/bug-report.entity.js";
+import { ENTITIES } from "../../orm.js";
 
 export default {
     name: "coding",
@@ -20,7 +24,17 @@ export default {
             path: 'coding://history',
             props: HistoryPropsSchema,
             factory: HistoryFactory
+        },
+        {
+            name: 'coding-bugfix',
+            description: 'Bug 报告管理系统。展示所有捕获的错误报告（包括 Action 错误、全局错误、手动报告），支持按状态和严重程度过滤，并提供智能自动修复功能（使用 Claude 或 Codex）。Use when user asks "show bugs", "list errors", "fix bugs", or wants to manage error reports.',
+            path: 'coding://bugfix',
+            props: BugfixPropsSchema,
+            factory: BugfixFactory
         }
     ],
-    providers: [],
+    providers: [
+        { provide: BugReportService, useClass: BugReportService },
+        { provide: ENTITIES, useValue: BugReport, multi: true }
+    ]
 } as Application
